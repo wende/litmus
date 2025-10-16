@@ -1,8 +1,8 @@
-# Litmus - Purity Analysis for Elixir
+# Litmus - Purity Analysis and Exception Tracking for Elixir
 
-**Litmus** is an Elixir wrapper for the [PURITY static analyzer](https://github.com/mpitid/purity), bringing purity analysis to the Elixir ecosystem. It can analyze compiled BEAM bytecode to classify functions as pure, side-effect free, or impure.
+**Litmus** extends the [PURITY static analyzer](https://github.com/mpitid/purity) with comprehensive exception tracking for Elixir. It analyzes compiled BEAM bytecode to classify functions by purity level and tracks which exceptions they may raise, enabling fine-grained control over exception policies in pure code.
 
-This project is a practical implementation of concepts from the accompanying [whitepaper on purity analysis for Elixir](./whitepaper.md).
+This project demonstrates concepts from the accompanying [whitepaper on purity analysis for Elixir](./whitepaper.md), proving that exception tracking is practical and achievable on the BEAM.
 
 ## What is Purity Analysis?
 
@@ -13,12 +13,24 @@ Purity analysis determines whether functions are **referentially transparent** (
 
 ## Purity Levels
 
-Litmus classifies functions into four categories:
+Litmus classifies functions into purity levels:
 
 - **`:pure`** - Referentially transparent, no side effects, no exceptions
 - **`:exceptions`** - Side-effect free but may raise exceptions
 - **`:dependent`** - Side-effect free but depends on execution environment (e.g., `node/0`)
+- **`:nif`** - Native code (behavior unknown, conservative assumption)
 - **`:side_effects`** - Has observable side effects (I/O, process operations, etc.)
+- **`:unknown`** - Cannot be analyzed (dynamic dispatch, missing debug_info)
+
+## Exception Tracking
+
+**New in v0.1.0**: Litmus tracks exceptions independently from purity, distinguishing between:
+
+- **Typed exceptions** (`:error` class) - ArgumentError, KeyError, etc. with known module types
+- **Untyped exceptions** (`:throw`/`:exit` classes) - Arbitrary values used for control flow
+- **Dynamic exceptions** (`:dynamic`) - Exceptions raised but type cannot be determined statically (e.g., `raise variable`)
+
+Exception information propagates through call graphs and can be queried per-function, enabling compile-time enforcement of exception policies.
 
 ## Installation
 
@@ -27,10 +39,12 @@ Add `litmus` to your `mix.exs` dependencies:
 ```elixir
 def deps do
   [
-    {:litmus, github: "yourusername/litmus"}
+    {:litmus, github: "wende/litmus", tag: "v0.1.0"}
   ]
 end
 ```
+
+Run `mix deps.get` to install.
 
 ## Usage
 
@@ -68,6 +82,36 @@ Litmus.pure?(results, {:lists, :keydelete, 3})
 # Identify functions that couldn't be analyzed
 %{functions: mfas, primops: prims} = Litmus.find_missing(results)
 ```
+
+### Exception Tracking
+
+Analyze which exceptions functions may raise:
+
+```elixir
+# Analyze exceptions for a module
+{:ok, exceptions} = Litmus.analyze_exceptions(MyModule)
+
+# Check if a function can raise a specific exception
+Litmus.can_raise?(exceptions, {MyModule, :parse, 1}, ArgumentError)
+#=> true
+
+# Check if a function can throw/exit
+Litmus.can_throw_or_exit?(exceptions, {MyModule, :parse, 1})
+#=> false
+
+# Get detailed exception information
+{:ok, info} = Litmus.get_exceptions(exceptions, {MyModule, :parse, 1})
+#=> {:ok, %{
+#=>   errors: MapSet.new([ArgumentError, KeyError]),
+#=>   non_errors: false
+#=> }}
+```
+
+Exception tracking works by:
+1. Identifying calls to `raise`, `throw`, `exit`, and `:erlang.error/1,2`
+2. Propagating exceptions through call graphs via fixed-point iteration
+3. Analyzing try/catch blocks using Core Erlang AST to subtract caught exceptions
+4. Marking dynamic raises (e.g., `raise variable`) as `:dynamic` when types cannot be determined
 
 ### Elixir Standard Library Whitelist
 
@@ -149,6 +193,45 @@ Pure blocks can only call whitelisted pure functions.
 See Litmus.Stdlib for the complete whitelist.
 ```
 
+#### Exception Policies
+
+**New in v0.1.0**: Control which exceptions are allowed in pure blocks:
+
+```elixir
+import Litmus.Pure
+
+# Allow specific exceptions in otherwise pure code
+result = pure level: :pure, allow_exceptions: [ArgumentError, KeyError] do
+  # ✅ Computationally pure but may raise specific exceptions
+  Map.fetch!(data, :key) |> String.to_integer!()
+end
+
+# Allow any exceptions but forbid I/O
+result = pure level: :pure, allow_exceptions: :any do
+  # ✅ May raise anything, but no side effects
+  Integer.parse!(user_input)
+end
+
+# Forbid all exceptions
+result = pure level: :pure, allow_exceptions: :none do
+  # ❌ Would fail if this could raise
+  Enum.sum([1, 2, 3])  # ✅ This is safe
+end
+
+# ❌ This fails - KeyError not in allowed list
+pure allow_exceptions: [ArgumentError] do
+  Map.fetch!(%{}, :missing)  # Raises KeyError!
+end
+
+** (Litmus.Pure.ImpurityError) Disallowed exception calls detected in pure block:
+
+  - Map.fetch!/2 (raises: KeyError)
+
+Allowed exceptions: only [ArgumentError]
+```
+
+The system uses static analysis to determine which exceptions each function may raise and enforces policies at compile time.
+
 #### How It Works
 
 1. **Macro expansion**: The `pure` macro expands all macros in the code block (including `|>`)
@@ -224,6 +307,7 @@ PURITY was developed in 2011 for Erlang R14, before several modern Erlang featur
 Static analysis cannot handle:
 
 - **Dynamic dispatch** - `apply/3`, module variables
+- **Dynamic exception raises** - `raise variable` marked as `:dynamic` (conservative)
 - **Metaprogramming** - Macros generate different code in different contexts
 - **NIFs** - Native code is a black box
 - **Process message passing** - Cross-process effects are invisible
@@ -231,11 +315,15 @@ Static analysis cannot handle:
 
 ### 3. Conservative Approximations
 
-PURITY uses conservative analysis:
+PURITY and exception tracking use conservative analysis:
 
 - **False negatives** - Some pure functions may be marked impure
+- **Over-reporting exceptions** - Dynamic raises marked as `:dynamic` (may raise anything)
+- **Try/catch fallback** - If Core Erlang extraction fails, caught exceptions not subtracted
 - **Higher-order functions** with dynamic closures cannot be fully analyzed
 - **Unknown functions** are assumed impure by default
+
+The conservative approach ensures **safety**: we may over-report impurity and exceptions, but we never under-report them. Real-world example: `Jason.decode!` uses `raise error` (variable), so it's marked with `:dynamic` exceptions rather than being completely unanalyzable.
 
 ## Example: Analyzing Erlang Modules
 
@@ -298,9 +386,12 @@ First 10 analyzed functions:
 
 Litmus consists of:
 
-1. **Core wrapper** (`lib/litmus.ex`) - Main API wrapping PURITY functions
-2. **PURITY library** (`purity_source/`) - Erlang static analyzer (forked with type fixes)
-3. **Type conversions** - Seamless Erlang ↔ Elixir data structure conversion
+1. **Core wrapper** (`lib/litmus.ex`) - Main API wrapping PURITY functions with exception tracking
+2. **Exception tracking** (`lib/litmus/exceptions.ex`) - Track exception propagation through call graphs
+3. **Try/catch analysis** (`lib/litmus/try_catch.ex`) - Core Erlang AST walking for exception subtraction
+4. **Pure macro** (`lib/litmus/pure.ex`) - Compile-time purity and exception enforcement
+5. **Stdlib whitelist** (`lib/litmus/stdlib.ex`) - Curated pure function whitelist
+6. **PURITY library** (`purity_source/`) - Erlang static analyzer (forked with type fixes)
 
 ### How It Works
 
@@ -308,7 +399,9 @@ Litmus consists of:
 2. **BEAM Analysis** - PURITY analyzes Core Erlang in the `.beam` files
 3. **Call Graph Construction** - Builds dependency graph of function calls
 4. **Purity Propagation** - Fixed-point iteration propagates impurity through callers
-5. **Result Conversion** - Erlang `dict()` results converted to Elixir maps
+5. **Exception Tracking** - Identifies exception-raising operations and propagates through call graph
+6. **Try/Catch Analysis** - Extracts Core Erlang AST to detect try/catch and subtract caught exceptions
+7. **Result Conversion** - Erlang `dict()` results converted to Elixir maps with exception information
 
 ## Comparison with Whitepaper
 
@@ -316,34 +409,53 @@ This implementation demonstrates concepts from the [Litmus whitepaper](./whitepa
 
 | Whitepaper Concept | Implementation |
 |-------------------|----------------|
-| Conservative static analysis | ✅ Uses PURITY's bytecode analyzer |
+| Conservative static analysis | ✅ PURITY's bytecode analyzer extended with exception tracking |
+| Exception tracking | ✅ **NEW** - Tracks exception propagation through call graphs |
+| Try/catch analysis | ✅ **NEW** - Core Erlang AST analysis subtracts caught exceptions |
+| Fine-grained exception policies | ✅ **NEW** - `allow_exceptions` option in pure macro |
+| :dynamic vs :unknown distinction | ✅ **NEW** - Semantic hierarchy for analysis failures |
+| Elixir stdlib classifications | ✅ `Litmus.Stdlib` whitelist module |
+| Compile-time enforcement | ✅ `pure` macro with purity and exception checking |
 | Optional annotations | ⏳ Planned (`@pure` attributes) |
 | PLT caching | ⏳ Planned (Litmus.PLT module) |
-| Convention-based practices | 📝 Documentation only |
-| Elixir stdlib classifications | ✅ Implemented `Litmus.Stdlib` whitelist module |
 | Mix tasks | ⏳ Planned (`mix litmus.analyze`) |
 | IDE integration | ⏳ Future work |
 
 ## Roadmap
 
-- [ ] **Litmus.PLT** - Persistent Lookup Table for caching results
-- [x] **Litmus.Stdlib** - ✅ **COMPLETED** - Whitelist-based purity classifications for Elixir standard library
-- [x] **Litmus.Pure** - ✅ **COMPLETED** - `pure do...end` macro for compile-time purity enforcement
+### Completed ✅
+
+- [x] **Litmus.Stdlib** - Whitelist-based purity classifications for Elixir standard library
+- [x] **Litmus.Pure** - `pure do...end` macro for compile-time purity enforcement
+- [x] **Litmus.Exceptions** - Exception tracking module with propagation through call graphs
+- [x] **Litmus.TryCatch** - Core Erlang AST analysis for try/catch exception subtraction
+- [x] **Exception policies** - Fine-grained `allow_exceptions` control in pure macro
+- [x] **:dynamic vs :unknown** - Semantic distinction for analysis failures
+
+### Planned ⏳
+
+- [ ] **Litmus.PLT** - Persistent Lookup Table for caching results across compilations
 - [ ] **Mix tasks** - `mix litmus.analyze`, `mix litmus.build_plt`
 - [ ] **Litmus.Results** - Pretty-printing and HTML/JSON report generation
-- [ ] **ExUnit integration** - Purity assertions in tests
+- [ ] **ExUnit integration** - Purity and exception assertions in tests
+- [ ] **@pure annotations** - Optional developer annotations for verification
 - [ ] **Update PURITY** - Support modern Erlang features (maps, etc.)
+- [ ] **IDE integration** - LSP server with inline purity/exception information
 
 ## Contributing
 
 Contributions welcome! Areas for improvement:
 
 1. **Update PURITY** to support Erlang maps and modern syntax
-2. **Expand stdlib whitelist** - Add more Elixir modules, refine existing classifications
-3. **PLT implementation** - Build persistent caching for analysis results
-4. **Mix tasks** - CLI tools for analysis and reporting
-5. **Documentation** - More usage examples and guides
-6. **Performance** - Optimize analysis for large codebases
+2. **Expand stdlib whitelist** - Add more Elixir modules, refine existing classifications with exception information
+3. **Improve exception tracking** - Handle more edge cases in try/catch analysis
+4. **PLT implementation** - Build persistent caching for purity and exception results
+5. **Mix tasks** - CLI tools for analysis and reporting
+6. **ExUnit integration** - Test helpers for asserting purity and exception properties
+7. **Documentation** - More usage examples and guides
+8. **Performance** - Optimize analysis for large codebases
+
+Run the test suite with `mix test` (220+ tests covering purity and exception tracking).
 
 ## License
 
