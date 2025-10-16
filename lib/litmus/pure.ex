@@ -341,8 +341,8 @@ defmodule Litmus.Pure do
 
           info ->
             # Have exception info - check if pure (no exceptions)
-            # Special case: if errors are :unknown but function is stdlib-whitelisted, trust the whitelist
-            if info.errors == :unknown and Litmus.Stdlib.whitelisted?(mfa) do
+            # Special case: if errors are :dynamic but function is stdlib-whitelisted, trust the whitelist
+            if info.errors == :dynamic and Litmus.Stdlib.whitelisted?(mfa) do
               true
             else
               Litmus.Exceptions.pure?(info)
@@ -369,8 +369,8 @@ defmodule Litmus.Pure do
 
           info ->
             # Have exception info - check if all exceptions are in the allowed list
-            # Special case: if errors are :unknown but function is stdlib-whitelisted, trust the whitelist
-            if info.errors == :unknown and Litmus.Stdlib.whitelisted?(mfa) do
+            # Special case: if errors are :dynamic but function is stdlib-whitelisted, trust the whitelist
+            if info.errors == :dynamic and Litmus.Stdlib.whitelisted?(mfa) do
               true
             else
               check_exceptions_in_allowed_list(info, allowed_list)
@@ -402,8 +402,8 @@ defmodule Litmus.Pure do
   # Check if all exceptions in info are in the allowed list
   defp check_exceptions_in_allowed_list(info, allowed_list) do
     case info.errors do
-      :unknown ->
-        # Unknown exceptions - can't verify, so reject
+      :dynamic ->
+        # Dynamic exceptions - can't verify, so reject
         false
 
       error_set ->
@@ -668,8 +668,8 @@ defmodule Litmus.Pure do
 
   defp classify_exception_violation(info, allow_exceptions) do
     case info.errors do
-      :unknown ->
-        " (raises unknown exceptions)"
+      :dynamic ->
+        " (raises dynamic exceptions)"
 
       error_set when allow_exceptions == :none ->
         errors = error_set |> MapSet.to_list() |> Enum.map(&inspect/1) |> Enum.join(", ")

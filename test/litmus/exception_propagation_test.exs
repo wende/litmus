@@ -58,12 +58,12 @@ defmodule Litmus.ExceptionPropagationTest do
     test "propagates unknown exceptions" do
       {:ok, results} = Litmus.analyze_exceptions(UnknownExceptionExample)
 
-      # Both should have :unknown errors since we can't determine the exception type
+      # Both should have :dynamic errors since we can't determine the exception type
       info1 = results[{UnknownExceptionExample, :caller, 1}]
       info2 = results[{UnknownExceptionExample, :raiser, 1}]
 
-      assert info1.errors == :unknown
-      assert info2.errors == :unknown
+      assert info1.errors == :dynamic
+      assert info2.errors == :dynamic
     end
 
     test "pure function has no exceptions" do

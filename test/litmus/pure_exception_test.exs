@@ -32,9 +32,11 @@ defmodule Litmus.PureExceptionTest do
     test "allows functions that raise only ArgumentError" do
       # Note: This test verifies the compile-time check passes
       # The actual runtime behavior would still raise if given invalid input
+      list = Enum.take([], 0)
+
       assert_raise ArgumentError, fn ->
         pure allow_exceptions: [ArgumentError] do
-          hd([])  # Raises ArgumentError on empty list
+          hd(list)  # Raises ArgumentError on empty list
         end
       end
     end
@@ -79,17 +81,21 @@ defmodule Litmus.PureExceptionTest do
     end
 
     test "allows ArgumentError function" do
+      list = Enum.take([], 0)
+
       assert_raise ArgumentError, fn ->
         pure allow_exceptions: [ArgumentError, KeyError] do
-          hd([])  # Raises ArgumentError on empty list
+          hd(list)  # Raises ArgumentError on empty list
         end
       end
     end
 
     test "allows KeyError function" do
+      map = Map.new()
+
       assert_raise KeyError, fn ->
         pure allow_exceptions: [ArgumentError, KeyError] do
-          Map.fetch!(%{}, :missing)
+          Map.fetch!(map, :missing)
         end
       end
     end
@@ -107,17 +113,21 @@ defmodule Litmus.PureExceptionTest do
     end
 
     test "allows ArgumentError function" do
+      list = Enum.take([], 0)
+
       assert_raise ArgumentError, fn ->
         pure allow_exceptions: :any do
-          hd([])  # Raises ArgumentError on empty list
+          hd(list)  # Raises ArgumentError on empty list
         end
       end
     end
 
     test "allows KeyError function" do
+      map = Map.new()
+
       assert_raise KeyError, fn ->
         pure allow_exceptions: :any do
-          Map.fetch!(%{}, :missing)
+          Map.fetch!(map, :missing)
         end
       end
     end

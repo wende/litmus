@@ -2,9 +2,9 @@
 
 **Implementing a purity analysis system for Elixir is theoretically possible but faces significant practical challenges.** While static analysis can identify obvious side effects and trace direct function calls, Elixir's dynamic nature—including metaprogramming, dynamic dispatch, NIFs, and process-based concurrency—creates fundamental obstacles that prevent complete compile-time purity verification. The most viable approach combines conservative static analysis on BEAM bytecode (similar to Erlang's PURITY tool), optional developer annotations, and convention-based practices, accepting that some pure functions will be misclassified and dynamic code paths will require runtime information.
 
-**Why this matters:** Purity analysis could enable compiler optimizations, improve testability, support parallelization, and provide better documentation. However, any implementation must balance theoretical soundness with practical usability in a language designed for fault-tolerant, concurrent systems rather than mathematical purity.
+**Why this matters:** Purity analysis could enable compiler optimizations, improve testability, support parallelization, and provide better documentation. Exception tracking—a complementary concern—enables developers to enforce which exceptions are allowed in pure code blocks, distinguishing between computational purity (no I/O) and exception safety. However, any implementation must balance theoretical soundness with practical usability in a language designed for fault-tolerant, concurrent systems rather than mathematical purity.
 
-**The reality check:** The Elixir/BEAM ecosystem currently has no mature purity analysis tools, reflecting both technical challenges and philosophical differences from purely functional languages like Haskell. While experimental attempts exist (like Efx for algebraic effects), they remain proof-of-concepts rather than production tools.
+**What we've demonstrated:** Building on Erlang's PURITY analyzer, we've shown that BEAM bytecode analysis can track not just purity levels but also exception propagation. Static analysis can identify which exception modules functions may raise, propagate exceptions through call graphs, and even analyze try/catch blocks using Core Erlang AST to subtract caught exceptions. This enables fine-grained control over exception policies in pure code while maintaining conservative safety guarantees.
 
 ## Existing tools reveal a significant gap
 
@@ -14,7 +14,9 @@ The Elixir ecosystem lacks any production-ready purity analysis system. **Dialyz
 
 The closest existing tool is the **Erlang PURITY analyzer** developed by Pitidis and Sagonas in 2011. This tool performs static analysis on BEAM bytecode to classify functions into purity levels: referentially transparent, side-effect free, or side-effect free with dependencies. It successfully analyzed the entire Erlang/OTP distribution and was integrated into compiler development branches. However, it cannot analyze dynamically-called functions (using apply/3), requires conservative approximations, and has seen limited adoption. This tool demonstrates that bytecode-level purity analysis is viable for BEAM languages, providing a blueprint for Elixir implementation.
 
-Elixir's recent gradual typing work (v1.18+) focuses on type correctness rather than effect tracking, though the infrastructure being built could potentially support effect annotations in the future. The community currently relies on testing practices, architectural patterns like "purity injection," and manual discipline to manage side effects.
+**Building on PURITY's foundation**, we can extend bytecode analysis with exception tracking—identifying which exception modules functions raise and propagating this information through call graphs. Core Erlang AST analysis adds precision by detecting try/catch blocks and subtracting caught exceptions. This enables compile-time enforcement of exception policies in pure blocks, distinguishing between computational purity (no I/O) and exception safety. The approach is practical: analyze standard library functions once, cache results, and conservatively handle dynamic code with `:dynamic` markers when static analysis fails.
+
+Elixir's recent gradual typing work (v1.18+) focuses on type correctness rather than effect tracking, though the infrastructure being built could potentially support effect annotations in the future. For now, bytecode analysis combined with optional developer annotations provides a pragmatic path forward without requiring language changes.
 
 ## Technical implementation requires multi-phase analysis
 
@@ -53,9 +55,15 @@ defp fixed_point(graph, current, previous) do
 end
 ```
 
+**Phase four tracks exceptions independently from purity**. Exception tracking is orthogonal to purity—a function can be computationally pure (no I/O, no state mutation) yet still raise exceptions. The BEAM VM has three exception classes: `:error` (typed exceptions like ArgumentError with stack traces), `:throw` (untyped non-local control flow), and `:exit` (process termination signals). Static analysis can track which exception modules functions raise by identifying calls to `raise`, `:erlang.error/1,2`, `throw/1`, and `exit/1`.
+
+For dynamic raises (e.g., `raise error` where `error` is a variable), the system marks exceptions as `:dynamic`—a lesser impurity than `:unknown` purity levels. We know exceptions are raised but cannot determine which types statically. Exception information propagates through call graphs similarly to purity: if function A calls function B, A inherits B's possible exceptions.
+
+**Phase five analyzes try/catch for exception subtraction**. Core Erlang AST—the intermediate representation before BEAM bytecode—exposes try/catch structure that's lost in compiled bytecode. By extracting Core Erlang from debug_info chunks, walking the AST to find try expressions, and parsing catch patterns to identify which exception classes and types are caught, the analyzer can subtract caught exceptions from propagated exceptions. This enables precise tracking: a function that catches ArgumentError internally doesn't propagate it to callers.
+
 Academic research provides theoretical foundations through **type-and-effect systems**. Nielson and Nielson's framework extends regular types with effect annotations (τ₁ → ε τ₂), where ε represents a set of side effects. Modern effect systems like Koka use row-polymorphic effect types with flexible composition (`⟨exn,div|μ⟩`) and effect handlers for elimination. Algebraic effect handlers treat effects as resumable operations with handler-provided semantics, enabling user-definable control flow abstractions.
 
-For dynamically-typed languages, **gradual effect systems** combine static and dynamic checking through unknown effects (⊤), allowing effect tracking without full static types. This approach lets developers progressively annotate codebases while maintaining backward compatibility—exactly what Elixir would need.
+For dynamically-typed languages, **gradual effect systems** combine static and dynamic checking through unknown effects (⊤), allowing effect tracking without full static types. This approach lets developers progressively annotate codebases while maintaining backward compatibility—exactly what Elixir would need. The demonstrated exception tracking system follows this gradual approach: precise for statically-determinable exceptions, conservative for dynamic code.
 
 ## BEAM characteristics create fundamental obstacles
 
@@ -150,6 +158,10 @@ Key insight: **Type-level enforcement requires static typing infrastructure**. D
 
 A viable purity analysis system for Elixir must accept fundamental limitations and combine multiple strategies. **Start with conservative bytecode analysis** following the Erlang PURITY model: analyze compiled BEAM bytecode with debug_info, identify obvious side-effecting operations (IO.*, File.*, Process.*, :ets.*, :erlang.send, etc.), build call graphs using XREF-like digraph representation, and propagate impurity through fixed-point iteration. Mark unknown/dynamic calls as potentially impure by default.
 
+**Extend analysis to track exceptions separately from purity**. Identify exception-raising operations (raise, throw, exit, :erlang.error), distinguish between three BEAM exception classes (error, throw, exit), track which exception modules are raised (ArgumentError, KeyError, etc.), mark dynamic raises (raise variable) as `:dynamic` rather than unknown, and propagate exception information through the call graph using fixed-point iteration. Exception tracking enables fine-grained policies: a pure block might allow specific exceptions (ArgumentError) while forbidding others (KeyError) or I/O operations.
+
+**Analyze Core Erlang AST for try/catch handling**. Extract Core Erlang from compiled modules' debug_info, walk the AST using recursive descent to find try expressions, parse catch patterns to identify caught exception classes and types, and subtract caught exceptions from propagated exceptions. When a function internally catches ArgumentError, that exception doesn't propagate to callers. This approach is conservative: if Core Erlang extraction fails (missing debug_info, unsupported format), fall back to over-reporting exceptions—safe but imprecise.
+
 **Support gradual annotation** allowing developers to mark functions as pure:
 ```elixir
 @spec pure_computation(integer()) :: integer()
@@ -163,7 +175,7 @@ Tooling verifies these claims by checking that annotated functions don't call kn
 
 **Handle dynamic features conservatively**. For dynamic dispatch via apply/3 or module variables, assume all effects unless annotations specify otherwise. For macros, analyze expanded AST and track macro expansions to identify code generation patterns. For NIFs, maintain whitelist of known-pure NIFs (rare) and assume impure by default. For protocols, analyze each implementation separately and mark functions as pure only if all implementations are pure.
 
-**Cache analysis results** to enable incremental analysis. Store per-module summaries with function purity information, track dependencies to reanalyze only changed modules, and reuse summaries for library code across projects.
+**Cache analysis results** to enable incremental analysis. Store per-module summaries with function purity information and exception tracking, track dependencies to reanalyze only changed modules, and reuse summaries for library code across projects.
 
 Example summary structure:
 ```elixir
@@ -172,24 +184,40 @@ Example summary structure:
   version: "1.0.0",
   summaries: %{
     {:calculate, 2} => %{
-      pure?: true,
-      effects: [],
+      purity: :pure,
+      exceptions: %{
+        errors: MapSet.new([]),
+        non_errors: false  # No throw/exit
+      },
       calls: []
     },
+    {:parse, 1} => %{
+      purity: :exceptions,  # Pure but may raise
+      exceptions: %{
+        errors: MapSet.new([ArgumentError]),
+        non_errors: false
+      },
+      calls: [{String, :to_integer!, 1}]
+    },
     {:save, 1} => %{
-      pure?: false,
-      effects: [:io, :database],
+      purity: :side_effects,
+      exceptions: %{
+        errors: :dynamic,  # Unknown exceptions possible
+        non_errors: false
+      },
       calls: [{DB, :insert, 2}]
     }
   }
 }
 ```
 
-**Build supporting infrastructure** including Mix tasks for project-wide analysis, IDE integration showing purity information inline, documentation generation with purity badges in ExDoc, and testing helpers for verifying purity claims with property-based testing.
+**Build supporting infrastructure** including Mix tasks for project-wide analysis, IDE integration showing purity and exception information inline, documentation generation with purity badges and exception lists in ExDoc, compile-time macros enforcing exception policies in pure blocks, and testing helpers for verifying purity and exception claims with property-based testing. The demonstrated pure macro approach enables developers to specify allowed exceptions at the call site, with violations caught during compilation rather than at runtime.
 
 ## Limitations demand realistic expectations
 
 Any Elixir purity analysis system faces unavoidable constraints. **Undecidability** means some pure functions will be misclassified as impure due to dynamic dispatch, higher-order functions, or conservative approximations. Complete accuracy is mathematically impossible for Turing-complete languages.
+
+A key distinction emerges between **:dynamic exceptions and :unknown purity**. When analyzing `raise error` where `error` is a variable, the system knows an exception is raised but cannot determine which module statically—this is `:dynamic` exceptions, a lesser impurity. In contrast, `:unknown` purity means the analyzer cannot determine whether the function itself can be analyzed (e.g., dynamic function calls via apply/3). This hierarchy enables nuanced policies: `:dynamic` exceptions can be allowed in pure blocks with conservative assumptions (might raise anything), while `:unknown` purity requires rejecting the function entirely. Real-world libraries like Jason demonstrate this: `Jason.decode!` uses `raise error` internally, marking it with `:dynamic` exceptions rather than being completely unanalyzable.
 
 **Dynamic code paths** chosen at runtime through configuration, feature flags, or user input cannot be analyzed statically. Functions pure in one configuration might be impure in another. Runtime code compilation (`Code.compile_string/2`) and evaluation (`Code.eval_string/3`) inject code that cannot be analyzed at compile time.
 
@@ -205,12 +233,23 @@ Any Elixir purity analysis system faces unavoidable constraints. **Undecidabilit
 
 Implementing purity analysis for Elixir is **theoretically possible** within well-defined constraints. Static analysis can identify obvious side effects (IO operations, process spawning, ETS mutations), construct call graphs for statically-determinable function calls, propagate purity information through fixed-point iteration, and classify significant portions of typical codebases into pure versus impure categories. The Erlang PURITY tool proves this approach works for BEAM languages.
 
-However, **practical feasibility faces significant challenges**. Complete purity verification is impossible due to dynamic dispatch, metaprogramming, NIFs, message passing, hot code loading, and open-world polymorphism. Conservative approximations misclassify many pure functions as impure, particularly with higher-order functions and dynamic dispatch. The analysis cannot prove purity—only detect obvious impurity.
+**We've extended this foundation with exception tracking**, demonstrating that BEAM bytecode analysis can track which exception modules functions raise, propagate exception information through call graphs, distinguish between typed exceptions (error), untyped control flow (throw/exit), and dynamically-raised exceptions. Core Erlang AST analysis—walking the intermediate representation between Elixir and BEAM bytecode—enables detecting try/catch blocks and subtracting caught exceptions from propagated exceptions. This provides fine-grained control: a pure macro can allow specific exceptions (ArgumentError) while forbidding I/O operations or other exceptions.
 
-**The most promising path forward** combines multiple strategies: conservative static analysis on BEAM bytecode (adapt Erlang PURITY), optional developer annotations verified by tooling (@pure attributes), convention-based practices (naming patterns, module organization), Credo/Dialyzer integration for enforcement, IDE support for inline purity information, and comprehensive testing infrastructure for runtime verification.
+However, **practical feasibility faces significant challenges**. Complete purity verification is impossible due to dynamic dispatch, metaprogramming, NIFs, message passing, hot code loading, and open-world polymorphism. Conservative approximations misclassify many pure functions as impure, particularly with higher-order functions and dynamic dispatch. The analysis cannot prove purity—only detect obvious impurity. Similarly, dynamic exception raises (raise variable) cannot be precisely typed, requiring `:dynamic` markers that indicate "exceptions are raised but we don't know which."
 
-This hybrid approach provides immediate value—better documentation, improved testability, catching obvious mistakes, supporting incremental adoption—without requiring language changes or rewriting existing code. Developers opt into stricter checking via annotations while benefiting from analysis of dependencies. Tools warn about potential issues rather than enforcing strict guarantees.
+**The demonstrated path forward** combines multiple strategies: conservative static analysis on BEAM bytecode (extending Erlang PURITY with exception tracking), Core Erlang AST walking for try/catch analysis, optional developer annotations verified by tooling, convention-based practices (naming patterns, module organization), and comprehensive testing infrastructure for runtime verification. Exception tracking is orthogonal to purity—functions can be computationally pure yet raise exceptions, enabling nuanced policies like "allow all pure functions and ArgumentError but forbid I/O."
 
-The Elixir community should focus on **achievable goals** rather than perfect purity verification. Build tooling that identifies 80% of side effects with high confidence, document purity claims for library functions, establish conventions for pure versus impure code organization, and integrate analysis into development workflows (editors, CI/CD, code review). Accept that edge cases exist, dynamic code requires runtime verification, and pragmatism trumps theoretical purity.
+This hybrid approach provides immediate value—better documentation, improved testability, catching obvious mistakes, supporting incremental adoption—without requiring language changes or rewriting existing code. Developers can write pure blocks that allow specific exceptions:
 
-**Bottom line**: Yes, you can build a purity analysis system for Elixir that provides substantial value despite limitations. Model it after Erlang's PURITY tool for static analysis, adopt Clojure's conventions for community practices, learn from Koka's effect handlers for theoretical foundations, and integrate with existing tools (Dialyzer, Credo) rather than building from scratch. The result won't match Haskell's compile-time guarantees but will significantly improve code quality, testing, and documentation in a language fundamentally designed for concurrent, fault-tolerant systems rather than mathematical purity.
+```elixir
+pure level: :pure, allow_exceptions: [ArgumentError, KeyError] do
+  # Computationally pure but may raise specific exceptions
+  Map.fetch!(data, :key) |> String.to_integer!()
+end
+```
+
+The system enforces these policies at compile time through macro expansion and static analysis of dependencies.
+
+The Elixir community should focus on **achievable goals** rather than perfect purity verification. Build tooling that identifies 80% of side effects with high confidence, track exceptions separately from purity concerns, document purity and exception claims for library functions, establish conventions for pure versus impure code organization, and integrate analysis into development workflows (editors, CI/CD, code review). Accept that edge cases exist, dynamic code requires runtime verification, and pragmatism trumps theoretical purity.
+
+**Bottom line**: Yes, you can build a purity and exception tracking system for Elixir that provides substantial value despite limitations. We've demonstrated that BEAM bytecode analysis combined with Core Erlang AST walking enables tracking both purity levels and exception propagation, with try/catch subtraction providing precision beyond simple call graph analysis. The result won't match Haskell's compile-time guarantees but significantly improves code quality, testing, and documentation in a language fundamentally designed for concurrent, fault-tolerant systems. The conservative approach—over-reporting exceptions rather than under-reporting—maintains safety while providing practical utility for the 80% case where static analysis succeeds.

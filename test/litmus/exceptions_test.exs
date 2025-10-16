@@ -33,16 +33,16 @@ defmodule Litmus.ExceptionsTest do
     end
   end
 
-  describe "error_unknown/0" do
-    test "creates exception info for unknown exceptions" do
-      info = Exceptions.error_unknown()
+  describe "error_dynamic/0" do
+    test "creates exception info for dynamic exceptions" do
+      info = Exceptions.error_dynamic()
 
-      assert info.errors == :unknown
+      assert info.errors == :dynamic
       assert info.non_errors == false
     end
 
-    test "unknown errors can raise any exception" do
-      info = Exceptions.error_unknown()
+    test "dynamic errors can raise any exception" do
+      info = Exceptions.error_dynamic()
 
       assert Exceptions.can_raise?(info, ArgumentError)
       assert Exceptions.can_raise?(info, KeyError)
@@ -86,13 +86,13 @@ defmodule Litmus.ExceptionsTest do
       assert merged.non_errors == true
     end
 
-    test "unknown errors propagate" do
-      info1 = Exceptions.error_unknown()
+    test "dynamic errors propagate" do
+      info1 = Exceptions.error_dynamic()
       info2 = Exceptions.error(KeyError)
 
       merged = Exceptions.merge(info1, info2)
 
-      assert merged.errors == :unknown
+      assert merged.errors == :dynamic
     end
 
     test "merging with empty is identity" do
@@ -136,8 +136,8 @@ defmodule Litmus.ExceptionsTest do
       refute Exceptions.pure?(Exceptions.non_error())
     end
 
-    test "unknown errors make function impure" do
-      refute Exceptions.pure?(Exceptions.error_unknown())
+    test "dynamic errors make function impure" do
+      refute Exceptions.pure?(Exceptions.error_dynamic())
     end
   end
 
@@ -179,18 +179,18 @@ defmodule Litmus.ExceptionsTest do
       assert result.non_errors == true
     end
 
-    test "unknown errors stay unknown after subtraction" do
-      info = %{errors: :unknown, non_errors: false}
+    test "dynamic errors stay dynamic after subtraction" do
+      info = %{errors: :dynamic, non_errors: false}
       caught = %{errors: MapSet.new([ArgumentError]), non_errors: false}
 
       result = Exceptions.subtract(info, caught)
 
-      assert result.errors == :unknown
+      assert result.errors == :dynamic
     end
 
-    test "subtracting from known errors preserves them when unknown is caught" do
+    test "subtracting from known errors preserves them when dynamic is caught" do
       info = %{errors: MapSet.new([ArgumentError, KeyError]), non_errors: false}
-      caught = %{errors: :unknown, non_errors: false}
+      caught = %{errors: :dynamic, non_errors: false}
 
       result = Exceptions.subtract(info, caught)
 

@@ -771,6 +771,9 @@ defmodule Litmus.Stdlib do
 
       # Erlang BIFs - these are the compiled forms of Elixir functions
       {:erlang, :map_get, 2} => error(KeyError),
+      {:erlang, :hd, 1} => error(ArgumentError),
+      {:erlang, :tl, 1} => error(ArgumentError),
+      {:erlang, :element, 2} => error(ArgumentError),
 
       # File.read!/1, File.read!/2 - but File is impure anyway
       # Process operations - throw/exit

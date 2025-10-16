@@ -833,7 +833,33 @@ defmodule Litmus do
     # Propagate exceptions through call graph
     propagated = propagate_exceptions(exception_map, table)
 
-    {:ok, propagated}
+    # Analyze try/catch blocks to find caught exceptions
+    case Litmus.TryCatch.analyze_beam(beam_path) do
+      {:ok, caught_map} ->
+        # Subtract caught exceptions from propagated exceptions
+        final = subtract_caught_exceptions(propagated, caught_map)
+        {:ok, final}
+
+      {:error, _reason} ->
+        # If try/catch analysis fails, return propagated results (conservative)
+        {:ok, propagated}
+    end
+  end
+
+  # Subtract caught exceptions from propagated exceptions
+  defp subtract_caught_exceptions(exception_map, caught_map) do
+    Map.new(exception_map, fn {mfa, raised_exceptions} ->
+      case Map.get(caught_map, mfa) do
+        nil ->
+          # Function doesn't catch anything
+          {mfa, raised_exceptions}
+
+        caught_exceptions ->
+          # Subtract what's caught from what's raised
+          remaining = Litmus.Exceptions.subtract(raised_exceptions, caught_exceptions)
+          {mfa, remaining}
+      end
+    end)
   end
 
   # Extract exception information from a function's dependency list
@@ -887,7 +913,7 @@ defmodule Litmus do
   defp check_exception_call(:erlang, :error, arity) when arity in [1, 2] do
     # erlang:error raises exceptions, but we can't determine which one
     # from just the dependency list (would need to analyze arguments)
-    Litmus.Exceptions.error_unknown()
+    Litmus.Exceptions.error_dynamic()
   end
 
   defp check_exception_call(:erlang, :throw, 1) do

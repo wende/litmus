@@ -32,12 +32,12 @@ defmodule Litmus.Exceptions do
   We track exceptions using:
 
       @type exception_info :: %{
-        errors: MapSet.t(module()) | :unknown,
+        errors: MapSet.t(module()) | :dynamic,
         non_errors: boolean()
       }
 
   - `errors`: Set of exception modules (e.g., `MapSet.new([ArgumentError, KeyError])`)
-    or `:unknown` if exceptions are raised dynamically
+    or `:dynamic` if exceptions are raised dynamically
   - `non_errors`: Boolean flag indicating if `throw/1` or `exit/1` can be called
 
   ## Examples
@@ -56,7 +56,7 @@ defmodule Litmus.Exceptions do
 
       # Function that raises dynamic exceptions
       %{
-        errors: :unknown,
+        errors: :dynamic,
         non_errors: false
       }
 
@@ -68,7 +68,7 @@ defmodule Litmus.Exceptions do
   """
 
   @type exception_info :: %{
-          errors: MapSet.t(module()) | :unknown,
+          errors: MapSet.t(module()) | :dynamic,
           non_errors: boolean()
         }
 
@@ -102,14 +102,18 @@ defmodule Litmus.Exceptions do
   end
 
   @doc """
-  Creates exception info for unknown typed exceptions.
+  Creates exception info for dynamically-raised exceptions.
 
-  Used when exceptions are raised dynamically (e.g., `raise variable`).
+  Used when exceptions are raised dynamically (e.g., `raise variable`)
+  and we can't determine the specific exception type statically.
+
+  This represents a **lesser impurity** than :unknown purity level -
+  we know exceptions are raised, just not which specific types.
   """
-  @spec error_unknown() :: exception_info()
-  def error_unknown do
+  @spec error_dynamic() :: exception_info()
+  def error_dynamic do
     %{
-      errors: :unknown,
+      errors: :dynamic,
       non_errors: false
     }
   end
@@ -150,8 +154,8 @@ defmodule Litmus.Exceptions do
     }
   end
 
-  defp merge_errors(:unknown, _), do: :unknown
-  defp merge_errors(_, :unknown), do: :unknown
+  defp merge_errors(:dynamic, _), do: :dynamic
+  defp merge_errors(_, :dynamic), do: :dynamic
   defp merge_errors(set1, set2), do: MapSet.union(set1, set2)
 
   @doc """
@@ -176,7 +180,7 @@ defmodule Litmus.Exceptions do
   Checks if an exception info can raise a specific exception module.
 
   Returns `false` if the exception module is definitely not raised.
-  Returns `true` if it might be raised (including `:unknown` case).
+  Returns `true` if it might be raised (including `:dynamic` case).
 
   ## Examples
 
@@ -186,12 +190,12 @@ defmodule Litmus.Exceptions do
       iex> Litmus.Exceptions.can_raise?(info, RuntimeError)
       false
 
-      iex> unknown = %{errors: :unknown, non_errors: false}
-      iex> Litmus.Exceptions.can_raise?(unknown, ArgumentError)
+      iex> dynamic = %{errors: :dynamic, non_errors: false}
+      iex> Litmus.Exceptions.can_raise?(dynamic, ArgumentError)
       true
   """
   @spec can_raise?(exception_info(), module()) :: boolean()
-  def can_raise?(%{errors: :unknown}, _exception_module), do: true
+  def can_raise?(%{errors: :dynamic}, _exception_module), do: true
   def can_raise?(%{errors: errors}, exception_module) when is_atom(exception_module) do
     MapSet.member?(errors, exception_module)
   end
@@ -229,7 +233,7 @@ defmodule Litmus.Exceptions do
     not non_errors and empty_errors?(errors)
   end
 
-  defp empty_errors?(:unknown), do: false
+  defp empty_errors?(:dynamic), do: false
   defp empty_errors?(set), do: MapSet.size(set) == 0
 
   @doc """
@@ -259,7 +263,7 @@ defmodule Litmus.Exceptions do
     }
   end
 
-  defp subtract_errors(:unknown, _), do: :unknown
-  defp subtract_errors(errors, :unknown), do: errors
+  defp subtract_errors(:dynamic, _), do: :dynamic
+  defp subtract_errors(errors, :dynamic), do: errors
   defp subtract_errors(errors, caught), do: MapSet.difference(errors, caught)
 end
