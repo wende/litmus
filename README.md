@@ -391,7 +391,7 @@ Litmus consists of:
 3. **Try/catch analysis** (`lib/litmus/try_catch.ex`) - Core Erlang AST walking for exception subtraction
 4. **Pure macro** (`lib/litmus/pure.ex`) - Compile-time purity and exception enforcement
 5. **Stdlib whitelist** (`lib/litmus/stdlib.ex`) - Curated pure function whitelist
-6. **PURITY library** (`purity_source/`) - Erlang static analyzer (forked with type fixes)
+6. **PURITY library** (`purity_source/`) - [Forked Erlang static analyzer](https://github.com/wende/purity) with type fixes and map support
 
 ### How It Works
 
@@ -465,7 +465,8 @@ PURITY is released under the GNU Lesser General Public License (LGPL).
 
 ## References
 
-- [PURITY - Side-effect analyzer for Erlang](https://github.com/mpitid/purity)
+- [PURITY - Side-effect analyzer for Erlang](https://github.com/mpitid/purity) (Original by Pitidis & Sagonas)
+- [PURITY Fork](https://github.com/wende/purity) (Used by Litmus with type fixes and map support)
 - [Purity in Erlang (Academic Paper)](https://link.springer.com/chapter/10.1007/978-3-642-24276-2_9)
 - [Litmus Whitepaper](./whitepaper.md) - Theoretical foundations for purity analysis in Elixir
 
