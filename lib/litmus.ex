@@ -8,13 +8,18 @@ defmodule Litmus do
 
   ## Purity Levels
 
-  PURITY classifies functions into several categories:
+  PURITY classifies functions into several categories, ordered from most pure to least pure:
 
   - `:pure` (p) - Referentially transparent, no side effects, no exceptions
   - `:exceptions` (e) - Side-effect free but may raise exceptions
-  - `:dependent` (d) - Side-effect free but depends on execution environment
-  - `:nif` (n) - Calls a Native Implemented Function (behavior unknown)
-  - `:side_effects` (s) - Has side effects (I/O, process operations, etc.)
+  - `:dependent` (d) - Side-effect free but depends on execution environment (time, process dict, etc.)
+  - `:nif` (n) - Calls a Native Implemented Function (behavior unknown, conservatively treated as impure)
+  - `:side_effects` (s) - Has observable side effects (I/O, process operations, state mutation, etc.)
+
+  **NIFs are a distinct purity level** between `:dependent` and `:side_effects`. While
+  we cannot statically analyze native C/C++ code, we know that NIFs may be impure but
+  don't necessarily have side effects. This allows for more nuanced reasoning about
+  code that calls NIFs versus code that performs actual I/O.
 
   ## Usage
 
@@ -47,6 +52,7 @@ defmodule Litmus do
   @type termination_level :: :terminating | :non_terminating | :unknown
   @type termination_result :: %{mfa() => termination_level()}
   @type combined_result :: %{mfa() => {purity_level(), termination_level()}}
+  @type exception_result :: %{mfa() => Litmus.Exceptions.exception_info()}
   @type options :: keyword()
 
   # Purity result type from Erlang
@@ -474,6 +480,115 @@ defmodule Litmus do
   end
 
   @doc """
+  Analyzes a single module for exceptions that can be raised.
+
+  This tracks which specific exceptions (errors) can be raised by each function,
+  as well as whether throw/exit can be used.
+
+  ## Returns
+
+    - `{:ok, results}` - Map of `{module, function, arity}` to exception info
+    - `{:error, reason}` - If module cannot be analyzed
+
+  ## Examples
+
+      {:ok, results} = Litmus.analyze_exceptions(MyModule)
+      info = results[{MyModule, :my_func, 1}]
+      #=> %{errors: MapSet.new([ArgumentError]), non_errors: false}
+  """
+  @spec analyze_exceptions(module(), options()) :: {:ok, exception_result()} | {:error, term()}
+  def analyze_exceptions(module, opts \\ []) when is_atom(module) do
+    case get_beam_path(module) do
+      {:ok, beam_path} ->
+        analyze_file_exceptions(beam_path, opts)
+
+      {:error, reason} ->
+        {:error, {:beam_not_found, module, reason}}
+    end
+  end
+
+  @doc """
+  Checks if a function can raise a specific exception module.
+
+  ## Parameters
+
+    - `results` - Exception analysis results
+    - `mfa` - `{module, function, arity}` tuple
+    - `exception_module` - Exception module to check (e.g., `ArgumentError`)
+
+  ## Returns
+
+    - `true` if the function can raise that exception
+    - `false` otherwise
+
+  ## Examples
+
+      {:ok, results} = Litmus.analyze_exceptions(MyModule)
+      Litmus.can_raise?(results, {MyModule, :parse, 1}, ArgumentError)
+      #=> true
+  """
+  @spec can_raise?(exception_result(), mfa(), module()) :: boolean()
+  def can_raise?(results, mfa, exception_module) when is_map(results) do
+    case Map.get(results, mfa) do
+      nil -> false
+      info -> Litmus.Exceptions.can_raise?(info, exception_module)
+    end
+  end
+
+  @doc """
+  Checks if a function can throw or exit.
+
+  ## Parameters
+
+    - `results` - Exception analysis results
+    - `mfa` - `{module, function, arity}` tuple
+
+  ## Returns
+
+    - `true` if the function can use throw/exit
+    - `false` otherwise
+
+  ## Examples
+
+      {:ok, results} = Litmus.analyze_exceptions(MyModule)
+      Litmus.can_throw_or_exit?(results, {MyModule, :early_return, 1})
+      #=> true
+  """
+  @spec can_throw_or_exit?(exception_result(), mfa()) :: boolean()
+  def can_throw_or_exit?(results, mfa) when is_map(results) do
+    case Map.get(results, mfa) do
+      nil -> false
+      info -> Litmus.Exceptions.can_throw_or_exit?(info)
+    end
+  end
+
+  @doc """
+  Gets exception information for a specific function.
+
+  ## Parameters
+
+    - `results` - Exception analysis results
+    - `mfa` - `{module, function, arity}` tuple
+
+  ## Returns
+
+    - `{:ok, exception_info}` - The exception information
+    - `:error` - If function is not in results
+
+  ## Examples
+
+      {:ok, results} = Litmus.analyze_exceptions(MyModule)
+      {:ok, info} = Litmus.get_exceptions(results, {MyModule, :my_func, 1})
+      info.errors
+      #=> MapSet.new([ArgumentError, KeyError])
+  """
+  @spec get_exceptions(exception_result(), mfa()) ::
+          {:ok, Litmus.Exceptions.exception_info()} | :error
+  def get_exceptions(results, mfa) when is_map(results) do
+    Map.fetch(results, mfa)
+  end
+
+  @doc """
   Checks if a function is guaranteed to terminate.
 
   ## Parameters
@@ -695,5 +810,187 @@ defmodule Litmus do
       %{},
       erl_dict
     )
+  end
+
+  # Analyze a single file for exceptions
+  defp analyze_file_exceptions(beam_path, _opts) do
+    charlist_path = to_charlist(beam_path)
+
+    # Get the raw dependency table from PURITY
+    table = :purity_collect.file(charlist_path)
+
+    # Extract exception information from dependencies
+    exception_map =
+      :dict.fold(
+        fn mfa, deps, acc ->
+          exception_info = extract_exceptions_from_deps(mfa, deps)
+          Map.put(acc, mfa, exception_info)
+        end,
+        %{},
+        table
+      )
+
+    # Propagate exceptions through call graph
+    propagated = propagate_exceptions(exception_map, table)
+
+    {:ok, propagated}
+  end
+
+  # Extract exception information from a function's dependency list
+  defp extract_exceptions_from_deps(mfa, deps) when is_list(deps) do
+    # Check stdlib whitelist first
+    case Litmus.Stdlib.get_exception_info(mfa) do
+      nil ->
+        # Not in stdlib, analyze dependencies
+        analyze_deps_for_exceptions(deps)
+
+      stdlib_info ->
+        # Use stdlib info
+        stdlib_info
+    end
+  end
+
+  # Analyze dependencies to find exception-raising calls
+  defp analyze_deps_for_exceptions(deps) do
+    Enum.reduce(deps, Litmus.Exceptions.empty(), fn dep, acc ->
+      case dep do
+        # Remote call: check if it's erlang:error/throw/exit
+        {:remote, {module, function, arity}, _args} ->
+          exception_info = check_exception_call(module, function, arity)
+          merged = Litmus.Exceptions.merge(acc, exception_info)
+
+          # Also check stdlib whitelist if not an exception primitive
+          case Litmus.Stdlib.get_exception_info({module, function, arity}) do
+            nil -> merged
+            info -> Litmus.Exceptions.merge(merged, info)
+          end
+
+        # Check stdlib whitelist for remote calls
+        {:remote, mfa, _args} when is_tuple(mfa) and tuple_size(mfa) == 3 ->
+          exception_info = check_exception_call(elem(mfa, 0), elem(mfa, 1), elem(mfa, 2))
+          merged = Litmus.Exceptions.merge(acc, exception_info)
+
+          case Litmus.Stdlib.get_exception_info(mfa) do
+            nil -> merged
+            info -> Litmus.Exceptions.merge(merged, info)
+          end
+
+        # Local calls - will be handled by propagation
+        # Primops, etc - ignore for now
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  # Check if a call is to erlang:error/throw/exit
+  defp check_exception_call(:erlang, :error, arity) when arity in [1, 2] do
+    # erlang:error raises exceptions, but we can't determine which one
+    # from just the dependency list (would need to analyze arguments)
+    Litmus.Exceptions.error_unknown()
+  end
+
+  defp check_exception_call(:erlang, :throw, 1) do
+    Litmus.Exceptions.non_error()
+  end
+
+  defp check_exception_call(:erlang, :exit, 1) do
+    Litmus.Exceptions.non_error()
+  end
+
+  defp check_exception_call(_module, _function, _arity) do
+    Litmus.Exceptions.empty()
+  end
+
+  # Propagate exceptions through the call graph until fixpoint
+  defp propagate_exceptions(exception_map, table) do
+    # Build call graph: MFA -> [called MFAs]
+    call_graph = build_call_graph(table)
+
+    # Iterate until fixpoint
+    iterate_exception_propagation(exception_map, call_graph)
+  end
+
+  # Build call graph from dependency table
+  defp build_call_graph(table) do
+    :dict.fold(
+      fn mfa, deps, acc ->
+        callees = extract_called_mfas(deps)
+        Map.put(acc, mfa, callees)
+      end,
+      %{},
+      table
+    )
+  end
+
+  # Extract all called MFAs from a dependency list
+  defp extract_called_mfas(deps) when is_list(deps) do
+    Enum.flat_map(deps, fn dep ->
+      case dep do
+        # Local call (within same module)
+        {:local, {module, function, arity}, _args} ->
+          [{module, function, arity}]
+
+        # Local call with MFA tuple
+        {:local, mfa, _args} when is_tuple(mfa) and tuple_size(mfa) == 3 ->
+          [mfa]
+
+        # Remote call with explicit MFA tuple
+        {:remote, {module, function, arity}, _args} ->
+          [{module, function, arity}]
+
+        # Remote call with MFA tuple
+        {:remote, mfa, _args} when is_tuple(mfa) and tuple_size(mfa) == 3 ->
+          [mfa]
+
+        # Primops, etc - ignore for call graph
+        _ ->
+          []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  # Iterate exception propagation until fixpoint
+  defp iterate_exception_propagation(exception_map, call_graph) do
+    # Compute new exception map by merging with callee exceptions
+    new_map =
+      Map.new(exception_map, fn {mfa, direct_exceptions} ->
+        # Get all functions called by this function
+        callees = Map.get(call_graph, mfa, [])
+
+        # Merge exceptions from all callees
+        callee_exceptions =
+          callees
+          |> Enum.map(fn callee ->
+            # Check if callee is in our analysis results
+            case Map.get(exception_map, callee) do
+              nil ->
+                # Not in our module, check stdlib whitelist
+                Litmus.Stdlib.get_exception_info(callee) || Litmus.Exceptions.empty()
+
+              info ->
+                info
+            end
+          end)
+          |> Enum.reduce(Litmus.Exceptions.empty(), &Litmus.Exceptions.merge/2)
+
+        # Merge direct exceptions with callee exceptions
+        merged = Litmus.Exceptions.merge(direct_exceptions, callee_exceptions)
+        {mfa, merged}
+      end)
+
+    # Check if we reached fixpoint
+    if maps_equal?(new_map, exception_map) do
+      new_map
+    else
+      # Continue iterating
+      iterate_exception_propagation(new_map, call_graph)
+    end
+  end
+
+  # Check if two exception maps are equal
+  defp maps_equal?(map1, map2) do
+    map1 == map2
   end
 end

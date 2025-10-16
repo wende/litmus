@@ -184,10 +184,10 @@ defmodule Litmus.Stdlib do
         :try => [1],
         :quote => [1, 2],
         :unquote => [1],
-        :"%{}" => [1, 2, 3, 4, 5],  # Map literal syntax
-        :"{}" => [1, 2, 3, 4, 5],  # Tuple literal syntax
-        :"[]" => [1, 2, 3, 4, 5],  # List literal syntax
-        :"<<>>" => [1, 2, 3, 4, 5],  # Binary literal syntax
+        :"%{}" => [0, 1, 2, 3, 4, 5],  # Map literal syntax
+        :"{}" => [0, 1, 2, 3, 4, 5],  # Tuple literal syntax
+        :"[]" => [0, 1, 2, 3, 4, 5],  # List literal syntax
+        :"<<>>" => [0, 1, 2, 3, 4, 5],  # Binary literal syntax
 
         # Bitwise
         :&&& => [2],
@@ -373,8 +373,11 @@ defmodule Litmus.Stdlib do
   - `:pure` - Only pure functions allowed
   - `:exceptions` - Pure and exception-raising functions allowed
   - `:dependent` - Pure, exceptions, and environment-dependent allowed
-  - `:nif` - Pure, exceptions, dependent, and NIF functions allowed
-  - `:side_effects` - Everything except unknown allowed
+  - `:nif` - Pure, exceptions, dependent, and NIF functions allowed (native code, behavior unknown)
+  - `:side_effects` - Everything including I/O and state mutation allowed
+
+  NIFs represent a distinct purity level between `:dependent` and `:side_effects` because
+  they call native code that cannot be statically analyzed, but may not necessarily perform I/O.
 
   ## Examples
 
@@ -685,5 +688,113 @@ defmodule Litmus.Stdlib do
   @spec non_terminating_functions(module()) :: [{atom(), arity()}]
   def non_terminating_functions(module) when is_atom(module) do
     Map.get(termination_blacklist(), module, [])
+  end
+
+  @doc """
+  Exception whitelist for Elixir standard library.
+
+  Maps known stdlib functions to the exceptions they can raise.
+
+  ## Format
+
+  ```elixir
+  %{
+    {Module, :function, arity} => %Litmus.Exceptions{
+      errors: MapSet.new([ExceptionModule, ...]),
+      non_errors: boolean()
+    }
+  }
+  ```
+
+  ## Philosophy
+
+  - Only explicitly documented exceptions are tracked
+  - Functions not in the whitelist are assumed to raise no exceptions
+  - This is conservative - undocumented exceptions won't be tracked
+
+  ## Examples
+
+      iex> Litmus.Stdlib.get_exception_info({String, :to_integer!, 1})
+      %{errors: MapSet.new([ArgumentError]), non_errors: false}
+
+      iex> Litmus.Stdlib.get_exception_info({List, :first, 1})
+      %{errors: MapSet.new([ArgumentError]), non_errors: false}
+  """
+  @spec exception_whitelist() :: %{mfa() => Litmus.Exceptions.exception_info()}
+  def exception_whitelist do
+    import Litmus.Exceptions
+
+    %{
+      # String module
+      {String, :to_integer!, 1} => error(ArgumentError),
+      {String, :to_float!, 1} => error(ArgumentError),
+      {String, :to_existing_atom, 1} => error(ArgumentError),
+
+      # List module
+      {List, :first, 1} => error(ArgumentError),
+      {List, :last, 1} => error(ArgumentError),
+
+      # Map module
+      {Map, :fetch!, 2} => error(KeyError),
+      {Map, :get!, 2} => error(KeyError),
+      {Map, :pop!, 2} => error(KeyError),
+      {Map, :replace!, 3} => error(KeyError),
+      {Map, :update!, 3} => error(KeyError),
+
+      # Access module
+      {Access, :fetch!, 2} => error(KeyError),
+      {Access, :get!, 2} => error(KeyError),
+
+      # Enum module
+      {Enum, :at, 3} => error(Enum.OutOfBoundsError),
+      {Enum, :fetch!, 2} => error(Enum.OutOfBoundsError),
+
+      # Keyword module
+      {Keyword, :fetch!, 2} => error(KeyError),
+      {Keyword, :get!, 2} => error(KeyError),
+      {Keyword, :pop!, 2} => error(KeyError),
+
+      # Integer module
+      {Integer, :parse, 1} => error(ArgumentError),
+      {Integer, :parse, 2} => error(ArgumentError),
+      {Integer, :to_string!, 1} => error(ArgumentError),
+      {Integer, :to_charlist!, 1} => error(ArgumentError),
+
+      # Float module
+      {Float, :parse, 1} => error(ArgumentError),
+
+      # Kernel module - pattern matching failures
+      {Kernel, :hd, 1} => error(ArgumentError),
+      {Kernel, :tl, 1} => error(ArgumentError),
+      {Kernel, :elem, 2} => error(ArgumentError),
+      {Kernel, :binary_part, 3} => error(ArgumentError),
+
+      # Erlang BIFs - these are the compiled forms of Elixir functions
+      {:erlang, :map_get, 2} => error(KeyError),
+
+      # File.read!/1, File.read!/2 - but File is impure anyway
+      # Process operations - throw/exit
+      # These are tracked separately as non_errors
+    }
+  end
+
+  @doc """
+  Gets exception information for a stdlib function.
+
+  Returns the exception info if the function is in the exception whitelist,
+  or `nil` if no exception information is available (assumes no exceptions).
+
+  ## Examples
+
+      iex> info = Litmus.Stdlib.get_exception_info({String, :to_integer!, 1})
+      iex> info.errors
+      MapSet.new([ArgumentError])
+
+      iex> Litmus.Stdlib.get_exception_info({Enum, :map, 2})
+      nil
+  """
+  @spec get_exception_info(mfa()) :: Litmus.Exceptions.exception_info() | nil
+  def get_exception_info(mfa) do
+    Map.get(exception_whitelist(), mfa)
   end
 end

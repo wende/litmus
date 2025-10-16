@@ -61,12 +61,23 @@ defmodule Litmus.Pure do
       - `:pure` - Only strictly pure functions (no exceptions, no side effects)
       - `:exceptions` - Pure and exception-raising functions allowed
       - `:dependent` - Pure, exceptions, and environment-dependent allowed
-      - `:nif` - Pure, exceptions, dependent, and NIF functions allowed
-      - `:side_effects` - Everything allowed (disables checking)
+      - `:nif` - Pure, exceptions, dependent, and NIF functions allowed (behavior unknown)
+      - `:side_effects` - Everything allowed including I/O and state mutation (disables checking)
+
+    **Note:** NIFs are a distinct level between `:dependent` and `:side_effects` because
+    while we cannot analyze their native code, they may be computationally pure but are
+    conservatively treated as potentially impure.
 
     - `:require_termination` - Require all functions to terminate (default: `false`)
       - `true` - Only functions guaranteed to terminate are allowed
       - `false` - Non-terminating functions allowed (default)
+
+    - `:allow_exceptions` - Control which exceptions are allowed (default: not checked)
+      - `:none` - No exceptions allowed
+      - `:any` - Any exceptions allowed
+      - `[ExceptionModule, ...]` - Only specific exception modules allowed (e.g., `[ArgumentError, KeyError]`)
+      - Note: Exception checking is ONLY enabled when this option is explicitly specified
+      - Note: This is independent of `:level` - you can have `level: :pure` and still allow specific exceptions
 
   ## Examples
 
@@ -102,6 +113,18 @@ defmodule Litmus.Pure do
         Integer.parse("123")  # ✓ May raise but terminates
       end
 
+      # Allow specific exceptions only
+      result = pure allow_exceptions: [ArgumentError] do
+        String.to_integer!("123")  # ✓ Can raise ArgumentError
+        # Map.fetch!(%{}, :key)    # ❌ Would fail - raises KeyError!
+      end
+
+      # Allow multiple specific exceptions
+      result = pure allow_exceptions: [ArgumentError, KeyError] do
+        String.to_integer!("123")  # ✓ ArgumentError allowed
+        Map.fetch!(%{a: 1}, :a)    # ✓ KeyError allowed
+      end
+
       # Impure code fails at compile time
       pure do
         file_contents = File.read!("data.txt")  # ❌ Compile error!
@@ -134,6 +157,19 @@ defmodule Litmus.Pure do
     level = Keyword.get(opts, :level, :pure)
     require_termination = Keyword.get(opts, :require_termination, false)
 
+    # Get exception allowance settings and evaluate at compile time
+    # Note: exception checking is ONLY enabled when explicitly specified
+    allow_exceptions = case Keyword.fetch(opts, :allow_exceptions) do
+      {:ok, value} ->
+        # Evaluate the AST to get the actual value
+        {evaluated, _} = Code.eval_quoted(value, [], __CALLER__)
+        evaluated
+
+      :error ->
+        # Default: disable exception checking (nil means don't check)
+        nil
+    end
+
     # Expand all macros first to get the real function calls
     expanded_block = Macro.expand(block, __CALLER__)
 
@@ -154,8 +190,23 @@ defmodule Litmus.Pure do
       []
     end
 
-    # Raise compile error if any impure or non-terminating calls found
+    # Check each call for disallowed exceptions (only if explicitly enabled)
+    exception_violations = if allow_exceptions != nil and allow_exceptions != :any do
+      Enum.filter(calls, fn {module, _function, _arity} = call ->
+        not check_exceptions_allowed(call, module, allow_exceptions)
+      end)
+    else
+      []
+    end
+
+    # Raise compile error if any violations found
     cond do
+      impure_calls != [] and non_terminating_calls != [] and exception_violations != [] ->
+        raise_all_errors(impure_calls, non_terminating_calls, exception_violations, level, allow_exceptions, __CALLER__)
+
+      impure_calls != [] and exception_violations != [] ->
+        raise_purity_and_exception_error(impure_calls, exception_violations, level, allow_exceptions, __CALLER__)
+
       impure_calls != [] and non_terminating_calls != [] ->
         raise_combined_error(impure_calls, non_terminating_calls, level, __CALLER__)
 
@@ -164,6 +215,9 @@ defmodule Litmus.Pure do
 
       non_terminating_calls != [] ->
         raise_termination_error(non_terminating_calls, __CALLER__)
+
+      exception_violations != [] ->
+        raise_exception_error(exception_violations, allow_exceptions, __CALLER__)
 
       true ->
         :ok
@@ -267,6 +321,102 @@ defmodule Litmus.Pure do
     required_idx = Enum.find_index(level_order, &(&1 == required))
 
     actual_idx != nil and required_idx != nil and actual_idx <= required_idx
+  end
+
+  # Check if a function's exceptions are allowed
+  defp check_exceptions_allowed({_module, _function, _arity} = mfa, module, allow_exceptions) do
+    case allow_exceptions do
+      :none ->
+        # No exceptions allowed - function must not raise any exceptions
+        case get_exception_info_with_fallback(mfa, module) do
+          nil ->
+            # No exception info available
+            # Trust stdlib whitelist: if it's whitelisted as pure, allow it
+            if Litmus.Stdlib.whitelisted?(mfa) do
+              true
+            else
+              # Not whitelisted and can't determine exceptions - be conservative and reject
+              false
+            end
+
+          info ->
+            # Have exception info - check if pure (no exceptions)
+            # Special case: if errors are :unknown but function is stdlib-whitelisted, trust the whitelist
+            if info.errors == :unknown and Litmus.Stdlib.whitelisted?(mfa) do
+              true
+            else
+              Litmus.Exceptions.pure?(info)
+            end
+        end
+
+      :any ->
+        # Any exceptions allowed
+        true
+
+      allowed_list when is_list(allowed_list) ->
+        # Only specific exceptions allowed
+        case get_exception_info_with_fallback(mfa, module) do
+          nil ->
+            # No exception info available
+            # Trust stdlib whitelist: if it's whitelisted, allow it
+            # (assume it's pure and has no exceptions)
+            if Litmus.Stdlib.whitelisted?(mfa) do
+              true
+            else
+              # Not whitelisted and can't determine exceptions - be conservative and reject
+              false
+            end
+
+          info ->
+            # Have exception info - check if all exceptions are in the allowed list
+            # Special case: if errors are :unknown but function is stdlib-whitelisted, trust the whitelist
+            if info.errors == :unknown and Litmus.Stdlib.whitelisted?(mfa) do
+              true
+            else
+              check_exceptions_in_allowed_list(info, allowed_list)
+            end
+        end
+    end
+  end
+
+  # Get exception info from stdlib whitelist or analyze module
+  defp get_exception_info_with_fallback(mfa, module) do
+    # Try stdlib whitelist first
+    case Litmus.Stdlib.get_exception_info(mfa) do
+      nil ->
+        # Not in stdlib, try analyzing the module
+        try do
+          case Litmus.analyze_exceptions(module) do
+            {:ok, results} -> Map.get(results, mfa)
+            {:error, _reason} -> nil
+          end
+        rescue
+          _ -> nil
+        end
+
+      info ->
+        info
+    end
+  end
+
+  # Check if all exceptions in info are in the allowed list
+  defp check_exceptions_in_allowed_list(info, allowed_list) do
+    case info.errors do
+      :unknown ->
+        # Unknown exceptions - can't verify, so reject
+        false
+
+      error_set ->
+        # Check if function can throw/exit (non_errors)
+        if info.non_errors do
+          # Throw/exit not allowed in specific exception list
+          false
+        else
+          # Check if all error modules are in allowed list
+          allowed_set = MapSet.new(allowed_list)
+          MapSet.subset?(error_set, allowed_set)
+        end
+    end
   end
 
   # Extract all function calls from an AST node
@@ -478,6 +628,185 @@ defmodule Litmus.Pure do
       true ->
         " (may not terminate)"
     end
+  end
+
+  # Raise a detailed compile error about disallowed exceptions
+  defp raise_exception_error(exception_violations, allow_exceptions, caller) do
+    formatted_calls =
+      exception_violations
+      |> Enum.map(fn {m, f, a} = mfa ->
+        info = get_exception_info_with_fallback(mfa, m)
+        reason = classify_exception_violation(info, allow_exceptions)
+        "  - #{inspect(m)}.#{f}/#{a}#{reason}"
+      end)
+      |> Enum.join("\n")
+
+    allowed_desc = case allow_exceptions do
+      :none -> "no exceptions"
+      :any -> "any exceptions"
+      list when is_list(list) -> "only #{inspect(list)}"
+    end
+
+    message = """
+    Disallowed exception calls detected in pure block:
+
+    #{formatted_calls}
+
+    Allowed exceptions: #{allowed_desc}
+    Functions with disallowed exceptions cannot be used in this pure block.
+
+    Location: #{caller.file}:#{caller.line}
+    """
+
+    raise ImpurityError, message: message
+  end
+
+  # Classify why an exception is disallowed
+  defp classify_exception_violation(nil, _allow_exceptions) do
+    " (cannot determine exceptions)"
+  end
+
+  defp classify_exception_violation(info, allow_exceptions) do
+    case info.errors do
+      :unknown ->
+        " (raises unknown exceptions)"
+
+      error_set when allow_exceptions == :none ->
+        errors = error_set |> MapSet.to_list() |> Enum.map(&inspect/1) |> Enum.join(", ")
+        throws = if info.non_errors, do: ", throw/exit", else: ""
+        " (raises: #{errors}#{throws})"
+
+      error_set when is_list(allow_exceptions) ->
+        disallowed = MapSet.difference(error_set, MapSet.new(allow_exceptions))
+        disallowed_list = disallowed |> MapSet.to_list() |> Enum.map(&inspect/1) |> Enum.join(", ")
+
+        cond do
+          info.non_errors ->
+            " (raises: #{disallowed_list}, throw/exit not allowed)"
+
+          MapSet.size(disallowed) > 0 ->
+            " (raises disallowed: #{disallowed_list})"
+
+          true ->
+            " (unknown violation)"
+        end
+    end
+  end
+
+  # Raise combined error for purity and exception violations
+  defp raise_purity_and_exception_error(impure_calls, exception_violations, level, allow_exceptions, caller) do
+    level_desc = case level do
+      :pure -> "strictly pure (no exceptions, no side effects)"
+      :exceptions -> "pure or exception-raising (no side effects)"
+      :dependent -> "pure, exception-raising, or environment-dependent (no side effects)"
+      :nif -> "pure, exception-raising, environment-dependent, or NIF functions"
+      :side_effects -> "any level"
+    end
+
+    allowed_desc = case allow_exceptions do
+      :none -> "no exceptions"
+      :any -> "any exceptions"
+      list when is_list(list) -> "only #{inspect(list)}"
+    end
+
+    impure_formatted =
+      impure_calls
+      |> Enum.map(fn {m, f, a} = mfa ->
+        actual_level = Litmus.Stdlib.get_purity_level(mfa)
+        reason = classify_impurity(m, f, a, actual_level, level)
+        "  - #{inspect(m)}.#{f}/#{a}#{reason}"
+      end)
+      |> Enum.join("\n")
+
+    exception_formatted =
+      exception_violations
+      |> Enum.map(fn {m, f, a} = mfa ->
+        info = get_exception_info_with_fallback(mfa, m)
+        reason = classify_exception_violation(info, allow_exceptions)
+        "  - #{inspect(m)}.#{f}/#{a}#{reason}"
+      end)
+      |> Enum.join("\n")
+
+    message = """
+    Multiple violations detected in pure block:
+
+    IMPURE FUNCTION CALLS (level: #{inspect(level)}):
+    #{impure_formatted}
+
+    DISALLOWED EXCEPTION CALLS:
+    #{exception_formatted}
+
+    Required purity level: #{level_desc}
+    Allowed exceptions: #{allowed_desc}
+
+    Location: #{caller.file}:#{caller.line}
+    """
+
+    raise ImpurityError, message: message
+  end
+
+  # Raise combined error for all three types of violations
+  defp raise_all_errors(impure_calls, non_terminating_calls, exception_violations, level, allow_exceptions, caller) do
+    level_desc = case level do
+      :pure -> "strictly pure (no exceptions, no side effects)"
+      :exceptions -> "pure or exception-raising (no side effects)"
+      :dependent -> "pure, exception-raising, or environment-dependent (no side effects)"
+      :nif -> "pure, exception-raising, environment-dependent, or NIF functions"
+      :side_effects -> "any level"
+    end
+
+    allowed_desc = case allow_exceptions do
+      :none -> "no exceptions"
+      :any -> "any exceptions"
+      list when is_list(list) -> "only #{inspect(list)}"
+    end
+
+    impure_formatted =
+      impure_calls
+      |> Enum.map(fn {m, f, a} = mfa ->
+        actual_level = Litmus.Stdlib.get_purity_level(mfa)
+        reason = classify_impurity(m, f, a, actual_level, level)
+        "  - #{inspect(m)}.#{f}/#{a}#{reason}"
+      end)
+      |> Enum.join("\n")
+
+    non_term_formatted =
+      non_terminating_calls
+      |> Enum.map(fn {m, f, a} ->
+        reason = classify_non_termination(m, f, a)
+        "  - #{inspect(m)}.#{f}/#{a}#{reason}"
+      end)
+      |> Enum.join("\n")
+
+    exception_formatted =
+      exception_violations
+      |> Enum.map(fn {m, f, a} = mfa ->
+        info = get_exception_info_with_fallback(mfa, m)
+        reason = classify_exception_violation(info, allow_exceptions)
+        "  - #{inspect(m)}.#{f}/#{a}#{reason}"
+      end)
+      |> Enum.join("\n")
+
+    message = """
+    Multiple violations detected in pure block:
+
+    IMPURE FUNCTION CALLS (level: #{inspect(level)}):
+    #{impure_formatted}
+
+    NON-TERMINATING FUNCTION CALLS:
+    #{non_term_formatted}
+
+    DISALLOWED EXCEPTION CALLS:
+    #{exception_formatted}
+
+    Required purity level: #{level_desc}
+    Required termination: all functions must terminate
+    Allowed exceptions: #{allowed_desc}
+
+    Location: #{caller.file}:#{caller.line}
+    """
+
+    raise ImpurityError, message: message
   end
 
   @doc """
