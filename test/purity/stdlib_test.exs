@@ -191,7 +191,8 @@ defmodule Litmus.StdlibTest do
     test "returns integer for selective whitelists" do
       count = Stdlib.count_whitelisted(Kernel)
       assert is_integer(count)
-      assert count > 30  # Kernel has many whitelisted functions
+      # Kernel has many whitelisted functions
+      assert count > 30
     end
 
     test "returns 0 for non-whitelisted modules" do

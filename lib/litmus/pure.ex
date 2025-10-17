@@ -159,16 +159,17 @@ defmodule Litmus.Pure do
 
     # Get exception allowance settings and evaluate at compile time
     # Note: exception checking is ONLY enabled when explicitly specified
-    allow_exceptions = case Keyword.fetch(opts, :allow_exceptions) do
-      {:ok, value} ->
-        # Evaluate the AST to get the actual value
-        {evaluated, _} = Code.eval_quoted(value, [], __CALLER__)
-        evaluated
+    allow_exceptions =
+      case Keyword.fetch(opts, :allow_exceptions) do
+        {:ok, value} ->
+          # Evaluate the AST to get the actual value
+          {evaluated, _} = Code.eval_quoted(value, [], __CALLER__)
+          evaluated
 
-      :error ->
-        # Default: disable exception checking (nil means don't check)
-        nil
-    end
+        :error ->
+          # Default: disable exception checking (nil means don't check)
+          nil
+      end
 
     # Expand all macros first to get the real function calls
     expanded_block = Macro.expand(block, __CALLER__)
@@ -177,35 +178,51 @@ defmodule Litmus.Pure do
     calls = extract_function_calls(expanded_block)
 
     # Check each call for purity using PURITY analyzer
-    impure_calls = Enum.filter(calls, fn {module, _function, _arity} = call ->
-      not check_purity_with_analyzer(call, module, level)
-    end)
+    impure_calls =
+      Enum.filter(calls, fn {module, _function, _arity} = call ->
+        not check_purity_with_analyzer(call, module, level)
+      end)
 
     # Check each call for termination if required
-    non_terminating_calls = if require_termination do
-      Enum.filter(calls, fn {module, _function, _arity} = call ->
-        not check_termination_with_analyzer(call, module)
-      end)
-    else
-      []
-    end
+    non_terminating_calls =
+      if require_termination do
+        Enum.filter(calls, fn {module, _function, _arity} = call ->
+          not check_termination_with_analyzer(call, module)
+        end)
+      else
+        []
+      end
 
     # Check each call for disallowed exceptions (only if explicitly enabled)
-    exception_violations = if allow_exceptions != nil and allow_exceptions != :any do
-      Enum.filter(calls, fn {module, _function, _arity} = call ->
-        not check_exceptions_allowed(call, module, allow_exceptions)
-      end)
-    else
-      []
-    end
+    exception_violations =
+      if allow_exceptions != nil and allow_exceptions != :any do
+        Enum.filter(calls, fn {module, _function, _arity} = call ->
+          not check_exceptions_allowed(call, module, allow_exceptions)
+        end)
+      else
+        []
+      end
 
     # Raise compile error if any violations found
     cond do
       impure_calls != [] and non_terminating_calls != [] and exception_violations != [] ->
-        raise_all_errors(impure_calls, non_terminating_calls, exception_violations, level, allow_exceptions, __CALLER__)
+        raise_all_errors(
+          impure_calls,
+          non_terminating_calls,
+          exception_violations,
+          level,
+          allow_exceptions,
+          __CALLER__
+        )
 
       impure_calls != [] and exception_violations != [] ->
-        raise_purity_and_exception_error(impure_calls, exception_violations, level, allow_exceptions, __CALLER__)
+        raise_purity_and_exception_error(
+          impure_calls,
+          exception_violations,
+          level,
+          allow_exceptions,
+          __CALLER__
+        )
 
       impure_calls != [] and non_terminating_calls != [] ->
         raise_combined_error(impure_calls, non_terminating_calls, level, __CALLER__)
@@ -245,7 +262,8 @@ defmodule Litmus.Pure do
       Litmus.Stdlib.get_module_whitelist(module) != nil ->
         # Whitelisted stdlib module: check if specific function is whitelisted
         case Litmus.Stdlib.get_purity_level(mfa) do
-          nil -> false  # Not whitelisted = impure
+          # Not whitelisted = impure
+          nil -> false
           actual_level -> meets_purity_level?(actual_level, required_level)
         end
 
@@ -276,11 +294,26 @@ defmodule Litmus.Pure do
   # These should NEVER be analyzed, always rejected
   defp is_known_impure_stdlib?(module) do
     module in [
-      IO, File, Port,                        # I/O operations (use NIFs)
-      Logger,                                # Logging operations (side effects)
-      Process, Agent, Task, GenServer,       # Process operations
-      Registry, DynamicSupervisor, Supervisor, # Supervision
-      System, Node, Code, Application        # System operations
+      # I/O operations (use NIFs)
+      IO,
+      File,
+      Port,
+      # Logging operations (side effects)
+      Logger,
+      # Process operations
+      Process,
+      Agent,
+      Task,
+      GenServer,
+      # Supervision
+      Registry,
+      DynamicSupervisor,
+      Supervisor,
+      # System operations
+      System,
+      Node,
+      Code,
+      Application
     ]
   end
 
@@ -290,8 +323,12 @@ defmodule Litmus.Pure do
   defp check_termination_with_analyzer({_module, _function, _arity} = mfa, module) do
     # Check if stdlib has explicit knowledge about this function
     case Litmus.Stdlib.get_termination(mfa) do
-      :terminating -> true
-      :non_terminating -> false
+      :terminating ->
+        true
+
+      :non_terminating ->
+        false
+
       nil ->
         # Stdlib doesn't know, try PURITY analyzer
         try do
@@ -300,7 +337,8 @@ defmodule Litmus.Pure do
               case Map.get(results, mfa) do
                 :terminating -> true
                 :non_terminating -> false
-                nil -> true  # Conservative: assume terminates if not found
+                # Conservative: assume terminates if not found
+                nil -> true
               end
 
             {:error, _reason} ->
@@ -478,13 +516,14 @@ defmodule Litmus.Pure do
 
   # Raise a detailed compile error about impure functions
   defp raise_impurity_error(impure_calls, level, caller) do
-    level_desc = case level do
-      :pure -> "strictly pure (no exceptions, no side effects)"
-      :exceptions -> "pure or exception-raising (no side effects)"
-      :dependent -> "pure, exception-raising, or environment-dependent (no side effects)"
-      :nif -> "pure, exception-raising, environment-dependent, or NIF functions"
-      :side_effects -> "any level"
-    end
+    level_desc =
+      case level do
+        :pure -> "strictly pure (no exceptions, no side effects)"
+        :exceptions -> "pure or exception-raising (no side effects)"
+        :dependent -> "pure, exception-raising, or environment-dependent (no side effects)"
+        :nif -> "pure, exception-raising, environment-dependent, or NIF functions"
+        :side_effects -> "any level"
+      end
 
     formatted_calls =
       impure_calls
@@ -570,13 +609,14 @@ defmodule Litmus.Pure do
 
   # Raise combined error for both purity and termination violations
   defp raise_combined_error(impure_calls, non_terminating_calls, level, caller) do
-    level_desc = case level do
-      :pure -> "strictly pure (no exceptions, no side effects)"
-      :exceptions -> "pure or exception-raising (no side effects)"
-      :dependent -> "pure, exception-raising, or environment-dependent (no side effects)"
-      :nif -> "pure, exception-raising, environment-dependent, or NIF functions"
-      :side_effects -> "any level"
-    end
+    level_desc =
+      case level do
+        :pure -> "strictly pure (no exceptions, no side effects)"
+        :exceptions -> "pure or exception-raising (no side effects)"
+        :dependent -> "pure, exception-raising, or environment-dependent (no side effects)"
+        :nif -> "pure, exception-raising, environment-dependent, or NIF functions"
+        :side_effects -> "any level"
+      end
 
     impure_formatted =
       impure_calls
@@ -641,11 +681,12 @@ defmodule Litmus.Pure do
       end)
       |> Enum.join("\n")
 
-    allowed_desc = case allow_exceptions do
-      :none -> "no exceptions"
-      :any -> "any exceptions"
-      list when is_list(list) -> "only #{inspect(list)}"
-    end
+    allowed_desc =
+      case allow_exceptions do
+        :none -> "no exceptions"
+        :any -> "any exceptions"
+        list when is_list(list) -> "only #{inspect(list)}"
+      end
 
     message = """
     Disallowed exception calls detected in pure block:
@@ -678,7 +719,9 @@ defmodule Litmus.Pure do
 
       error_set when is_list(allow_exceptions) ->
         disallowed = MapSet.difference(error_set, MapSet.new(allow_exceptions))
-        disallowed_list = disallowed |> MapSet.to_list() |> Enum.map(&inspect/1) |> Enum.join(", ")
+
+        disallowed_list =
+          disallowed |> MapSet.to_list() |> Enum.map(&inspect/1) |> Enum.join(", ")
 
         cond do
           info.non_errors ->
@@ -694,20 +737,28 @@ defmodule Litmus.Pure do
   end
 
   # Raise combined error for purity and exception violations
-  defp raise_purity_and_exception_error(impure_calls, exception_violations, level, allow_exceptions, caller) do
-    level_desc = case level do
-      :pure -> "strictly pure (no exceptions, no side effects)"
-      :exceptions -> "pure or exception-raising (no side effects)"
-      :dependent -> "pure, exception-raising, or environment-dependent (no side effects)"
-      :nif -> "pure, exception-raising, environment-dependent, or NIF functions"
-      :side_effects -> "any level"
-    end
+  defp raise_purity_and_exception_error(
+         impure_calls,
+         exception_violations,
+         level,
+         allow_exceptions,
+         caller
+       ) do
+    level_desc =
+      case level do
+        :pure -> "strictly pure (no exceptions, no side effects)"
+        :exceptions -> "pure or exception-raising (no side effects)"
+        :dependent -> "pure, exception-raising, or environment-dependent (no side effects)"
+        :nif -> "pure, exception-raising, environment-dependent, or NIF functions"
+        :side_effects -> "any level"
+      end
 
-    allowed_desc = case allow_exceptions do
-      :none -> "no exceptions"
-      :any -> "any exceptions"
-      list when is_list(list) -> "only #{inspect(list)}"
-    end
+    allowed_desc =
+      case allow_exceptions do
+        :none -> "no exceptions"
+        :any -> "any exceptions"
+        list when is_list(list) -> "only #{inspect(list)}"
+      end
 
     impure_formatted =
       impure_calls
@@ -746,20 +797,29 @@ defmodule Litmus.Pure do
   end
 
   # Raise combined error for all three types of violations
-  defp raise_all_errors(impure_calls, non_terminating_calls, exception_violations, level, allow_exceptions, caller) do
-    level_desc = case level do
-      :pure -> "strictly pure (no exceptions, no side effects)"
-      :exceptions -> "pure or exception-raising (no side effects)"
-      :dependent -> "pure, exception-raising, or environment-dependent (no side effects)"
-      :nif -> "pure, exception-raising, environment-dependent, or NIF functions"
-      :side_effects -> "any level"
-    end
+  defp raise_all_errors(
+         impure_calls,
+         non_terminating_calls,
+         exception_violations,
+         level,
+         allow_exceptions,
+         caller
+       ) do
+    level_desc =
+      case level do
+        :pure -> "strictly pure (no exceptions, no side effects)"
+        :exceptions -> "pure or exception-raising (no side effects)"
+        :dependent -> "pure, exception-raising, or environment-dependent (no side effects)"
+        :nif -> "pure, exception-raising, environment-dependent, or NIF functions"
+        :side_effects -> "any level"
+      end
 
-    allowed_desc = case allow_exceptions do
-      :none -> "no exceptions"
-      :any -> "any exceptions"
-      list when is_list(list) -> "only #{inspect(list)}"
-    end
+    allowed_desc =
+      case allow_exceptions do
+        :none -> "no exceptions"
+        :any -> "any exceptions"
+        list when is_list(list) -> "only #{inspect(list)}"
+      end
 
     impure_formatted =
       impure_calls
@@ -839,9 +899,10 @@ defmodule Litmus.Pure do
     expanded_ast = if env, do: Macro.expand(ast, env), else: ast
     calls = extract_function_calls(expanded_ast)
 
-    impure_calls = Enum.filter(calls, fn call ->
-      not Litmus.Stdlib.whitelisted?(call)
-    end)
+    impure_calls =
+      Enum.filter(calls, fn call ->
+        not Litmus.Stdlib.whitelisted?(call)
+      end)
 
     if impure_calls == [] do
       {:ok, calls}

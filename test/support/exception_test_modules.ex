@@ -7,17 +7,20 @@ defmodule ExceptionTestModules do
   defmodule PropagateExample do
     def level1(x), do: level2(x)
     def level2(x), do: level3(x)
-    def level3(x), do: String.to_integer!(x)
+    # Raises ArgumentError if x is out of bounds
+    def level3(x), do: elem({:a, :b, :c}, x)
   end
 
   defmodule ThrowPropagateExample do
     def caller(x), do: thrower(x)
-    def thrower(x), do: if x > 10, do: throw(:too_big), else: x
+    def thrower(x), do: if(x > 10, do: throw(:too_big), else: x)
   end
 
   defmodule MultipleCalleesExample do
     def caller(x, y) do
-      a = String.to_integer!(x)
+      # Raises ArgumentError if x is empty list
+      a = hd(x)
+      # Raises KeyError if :key not found
       b = Map.fetch!(y, :key)
       a + b
     end
@@ -27,7 +30,8 @@ defmodule ExceptionTestModules do
     def top(x), do: middle(x)
     def middle(x), do: bottom(x)
     def bottom(x), do: deeper(x)
-    def deeper(x), do: String.to_integer!(x)
+    # Raises ArgumentError if x is out of bounds
+    def deeper(x), do: elem({:a, :b}, x)
   end
 
   defmodule MutualRecursionExample do

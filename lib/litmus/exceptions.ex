@@ -196,6 +196,7 @@ defmodule Litmus.Exceptions do
   """
   @spec can_raise?(exception_info(), module()) :: boolean()
   def can_raise?(%{errors: :dynamic}, _exception_module), do: true
+
   def can_raise?(%{errors: errors}, exception_module) when is_atom(exception_module) do
     MapSet.member?(errors, exception_module)
   end

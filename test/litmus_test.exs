@@ -13,10 +13,13 @@ defmodule LitmusTest do
 
       # Verify results contain MFA tuples as keys (most of them)
       # PURITY adds some built-in functions that might not be tuples
-      mfa_keys = Map.keys(results) |> Enum.filter(fn
-        {_, _, _} -> true
-        _ -> false
-      end)
+      mfa_keys =
+        Map.keys(results)
+        |> Enum.filter(fn
+          {_, _, _} -> true
+          _ -> false
+        end)
+
       assert length(mfa_keys) > 200, "Expected mostly MFA tuples as keys"
 
       # Verify all values are valid purity levels
@@ -60,7 +63,16 @@ defmodule LitmusTest do
       assert is_map(results)
 
       # Should contain functions from all modules
-      module_names = results |> Map.keys() |> Enum.filter(fn {_, _, _} -> true; _ -> false end) |> Enum.map(fn {m, _, _} -> m end) |> Enum.uniq()
+      module_names =
+        results
+        |> Map.keys()
+        |> Enum.filter(fn
+          {_, _, _} -> true
+          _ -> false
+        end)
+        |> Enum.map(fn {m, _, _} -> m end)
+        |> Enum.uniq()
+
       assert :lists in module_names
       assert :ordsets in module_names
       assert :queue in module_names
@@ -90,7 +102,16 @@ defmodule LitmusTest do
       assert is_map(results)
 
       # Should contain functions from all modules
-      module_names = results |> Map.keys() |> Enum.filter(fn {_, _, _} -> true; _ -> false end) |> Enum.map(fn {m, _, _} -> m end) |> Enum.uniq()
+      module_names =
+        results
+        |> Map.keys()
+        |> Enum.filter(fn
+          {_, _, _} -> true
+          _ -> false
+        end)
+        |> Enum.map(fn {m, _, _} -> m end)
+        |> Enum.uniq()
+
       assert :lists in module_names
       assert :ordsets in module_names
       assert :queue in module_names
@@ -269,7 +290,16 @@ defmodule LitmusTest do
                |> elem(1)
 
       # Verify we got results for multiple modules
-      module_names = results |> Map.keys() |> Enum.filter(fn {_, _, _} -> true; _ -> false end) |> Enum.map(fn {m, _, _} -> m end) |> Enum.uniq()
+      module_names =
+        results
+        |> Map.keys()
+        |> Enum.filter(fn
+          {_, _, _} -> true
+          _ -> false
+        end)
+        |> Enum.map(fn {m, _, _} -> m end)
+        |> Enum.uniq()
+
       assert length(module_names) >= 3, "Expected at least 3 modules analyzed"
     end
   end

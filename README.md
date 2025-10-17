@@ -32,6 +32,149 @@ Litmus classifies functions into purity levels:
 
 Exception information propagates through call graphs and can be queried per-function, enabling compile-time enforcement of exception policies.
 
+## Algebraic Effects System
+
+**New in v0.2.0**: Litmus includes a powerful **algebraic effects system** for testing and mocking side effects. Using continuation-passing style (CPS) transformation, you can intercept and mock any side effect at compile time.
+
+### Basic Usage
+
+```elixir
+import Litmus.Effects
+
+# Test file operations without touching the filesystem
+result = effect do
+  content = File.read!("config.json")
+  parsed = Jason.decode!(content)
+  File.write!("output.txt", parsed["result"])
+  :ok
+catch
+  {File, :read!, ["config.json"]} -> ~s({"result": "test data"})
+  {File, :write!, ["output.txt", "test data"]} -> :ok
+end
+
+assert result == :ok
+```
+
+### How It Works
+
+The `effect` macro transforms your code using **continuation-passing style (CPS)**:
+
+```elixir
+# You write this:
+effect do
+  x = File.read!("a.txt")
+  y = String.upcase(x)
+  File.write!("b.txt", y)
+catch
+  {File, :read!, _} -> "mocked"
+  {File, :write!, _} -> :ok
+end
+
+# It transforms to (conceptually):
+handler.({File, :read!, ["a.txt"]}, fn x ->
+  y = String.upcase(x)  # Pure code runs normally
+  handler.({File, :write!, ["b.txt", y]}, fn _result ->
+    :ok
+  end)
+end)
+```
+
+### Supported Features
+
+#### Control Flow with Effects
+
+```elixir
+effect do
+  x = if use_cache? do
+    File.read!("cache.txt")
+  else
+    fetch_from_network!()
+  end
+
+  process(x)
+catch
+  {File, :read!, _} -> "cached data"
+  {:http, :get, _} -> "network data"
+end
+```
+
+#### Anonymous Functions with Effects
+
+```elixir
+effect do
+  handler = fn
+    :read -> File.read!("data.txt")
+    :write -> File.write!("output.txt", "data")
+  end
+
+  handler.(:read)
+catch
+  {File, :read!, _} -> "mocked read"
+end
+```
+
+#### Variable Capture in Handlers
+
+```elixir
+effect do
+  File.write!("log.txt", "message")
+catch
+  {File, :write!, [path, content]} ->
+    assert path == "log.txt"
+    assert content == "message"
+    :ok
+end
+```
+
+#### Selective Effect Tracking
+
+```elixir
+# Only track file operations, ignore IO
+effect track: [:file] do
+  x = File.read!("test.txt")
+  IO.puts("Debug: #{x}")  # Not tracked, executes normally
+  x
+catch
+  {File, :read!, _} -> "mocked"
+end
+```
+
+### Effect Categories
+
+Effects are categorized for selective tracking:
+
+- **`:file`** - File operations (`File`, `Path`)
+- **`:io`** - Console I/O (`IO`)
+- **`:network`** - HTTP, TCP, UDP operations
+- **`:process`** - Process spawning and messaging
+- **`:database`** - Database operations (`Ecto`, `Repo`)
+- **`:exception`** - Exception-raising Kernel functions (`hd/1`, `elem/2`, `div/2`, etc.)
+
+### Testing Benefits
+
+- **No filesystem access** - Mock all file operations
+- **No network calls** - Test HTTP clients without servers
+- **Deterministic tests** - Control all side effects explicitly
+- **Fast tests** - No waiting for I/O
+- **Clear test intent** - Effect signatures document what's being tested
+
+### Limitations
+
+Currently **not supported** (future work):
+
+- ❌ `case`, `cond`, `with` expressions (use `if` for now)
+- ❌ Effects in `Enum.map` and similar higher-order functions
+- ❌ Functions returning functions with effects
+- ❌ Nested closure tracking across branches
+
+See `test/effects/effects_closure_test.exs` for working examples and `@tag :skip` for planned features.
+
+### Performance
+
+- **Zero runtime overhead** - Transformation happens at compile time
+- **No macros to expand at runtime** - Generated code is plain Elixir
+- **Inlined continuations** - Compiler can optimize the CPS-transformed code
+
 ## Installation
 
 Add `litmus` to your `mix.exs` dependencies:
@@ -391,7 +534,12 @@ Litmus consists of:
 3. **Try/catch analysis** (`lib/litmus/try_catch.ex`) - Core Erlang AST walking for exception subtraction
 4. **Pure macro** (`lib/litmus/pure.ex`) - Compile-time purity and exception enforcement
 5. **Stdlib whitelist** (`lib/litmus/stdlib.ex`) - Curated pure function whitelist
-6. **PURITY library** (`purity_source/`) - [Forked Erlang static analyzer](https://github.com/wende/purity) with type fixes and map support
+6. **Effects system** (`lib/litmus/effects/`) - Algebraic effects with CPS transformation
+   - **`effects.ex`** - Main effect macro and handler API
+   - **`transformer.ex`** - CPS transformation engine for AST
+   - **`registry.ex`** - Effect categorization and tracking
+   - **`unhandled_error.ex`** - Exception for unhandled effects
+7. **PURITY library** (`purity_source/`) - [Forked Erlang static analyzer](https://github.com/wende/purity) with type fixes and map support
 
 ### How It Works
 
@@ -432,8 +580,19 @@ This implementation demonstrates concepts from the [Litmus whitepaper](./whitepa
 - [x] **Exception policies** - Fine-grained `allow_exceptions` control in pure macro
 - [x] **:dynamic vs :unknown** - Semantic distinction for analysis failures
 
+### Recently Added 🎉
+
+- [x] **Litmus.Effects** - Algebraic effects system using continuation-passing style (CPS)
+- [x] **Effect handlers** - Mock and intercept side effects for testing
+- [x] **Control flow transformation** - `if/else` expressions with effects
+- [x] **Anonymous function support** - Transform closures with effects in their bodies
+- [x] **Effect tracking options** - Selective effect tracking by category (`:file`, `:io`, `:network`, etc.)
+
 ### Planned ⏳
 
+- [ ] **Advanced effect features** - `case`, `cond`, `with` expressions
+- [ ] **Higher-order function support** - Effects in `Enum.map`, callbacks, etc.
+- [ ] **Nested closure tracking** - Functions returning functions with effects
 - [ ] **Litmus.PLT** - Persistent Lookup Table for caching results across compilations
 - [ ] **Mix tasks** - `mix litmus.analyze`, `mix litmus.build_plt`
 - [ ] **Litmus.Results** - Pretty-printing and HTML/JSON report generation
@@ -455,7 +614,7 @@ Contributions welcome! Areas for improvement:
 7. **Documentation** - More usage examples and guides
 8. **Performance** - Optimize analysis for large codebases
 
-Run the test suite with `mix test` (220+ tests covering purity and exception tracking).
+Run the test suite with `mix test` (**287 tests** covering purity analysis, exception tracking, and algebraic effects - 100% passing).
 
 ## License
 

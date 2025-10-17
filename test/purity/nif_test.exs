@@ -62,6 +62,7 @@ defmodule Litmus.NifTest do
             # Pure function should still be pure (or exceptions)
             if Map.has_key?(results, {module, :pure_function, 1}) do
               purity = Map.get(results, {module, :pure_function, 1})
+
               assert purity in [:pure, :exceptions],
                      "Pure function should be :pure or :exceptions, got: #{inspect(purity)}"
             end

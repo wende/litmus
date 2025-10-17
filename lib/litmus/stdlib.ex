@@ -184,18 +184,22 @@ defmodule Litmus.Stdlib do
         :try => [1],
         :quote => [1, 2],
         :unquote => [1],
-        :"%{}" => [0, 1, 2, 3, 4, 5],  # Map literal syntax
-        :"{}" => [0, 1, 2, 3, 4, 5],  # Tuple literal syntax
-        :"[]" => [0, 1, 2, 3, 4, 5],  # List literal syntax
-        :"<<>>" => [0, 1, 2, 3, 4, 5],  # Binary literal syntax
+        # Map literal syntax
+        :%{} => [0, 1, 2, 3, 4, 5],
+        # Tuple literal syntax
+        :{} => [0, 1, 2, 3, 4, 5],
+        # List literal syntax
+        :"[]" => [0, 1, 2, 3, 4, 5],
+        # Binary literal syntax
+        :<<>> => [0, 1, 2, 3, 4, 5],
 
         # Bitwise
         :&&& => [2],
         :<<< => [2],
         :>>> => [2],
-        :^^^ => [2],
-        :~~~ => [1],
-        :|||  => [2],
+        :"^^^" => [2],
+        :"~~~" => [1],
+        :||| => [2],
 
         # Data structure operations
         :++ => [2],
@@ -294,7 +298,8 @@ defmodule Litmus.Stdlib do
       nil
   """
   @spec get_purity_level(mfa()) :: purity_level() | nil
-  def get_purity_level({module, function, arity}) when is_atom(module) and is_atom(function) and is_integer(arity) do
+  def get_purity_level({module, function, arity})
+      when is_atom(module) and is_atom(function) and is_integer(arity) do
     case Map.get(whitelist(), module) do
       nil ->
         nil
@@ -611,7 +616,8 @@ defmodule Litmus.Stdlib do
       false
   """
   @spec terminates?(mfa()) :: boolean()
-  def terminates?({module, function, arity}) when is_atom(module) and is_atom(function) and is_integer(arity) do
+  def terminates?({module, function, arity})
+      when is_atom(module) and is_atom(function) and is_integer(arity) do
     case Map.get(termination_blacklist(), module) do
       nil ->
         # Module not in blacklist - assume terminates
@@ -773,7 +779,7 @@ defmodule Litmus.Stdlib do
       {:erlang, :map_get, 2} => error(KeyError),
       {:erlang, :hd, 1} => error(ArgumentError),
       {:erlang, :tl, 1} => error(ArgumentError),
-      {:erlang, :element, 2} => error(ArgumentError),
+      {:erlang, :element, 2} => error(ArgumentError)
 
       # File.read!/1, File.read!/2 - but File is impure anyway
       # Process operations - throw/exit

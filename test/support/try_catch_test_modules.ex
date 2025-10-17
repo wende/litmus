@@ -22,8 +22,10 @@ defmodule TryCatchTestModules do
     """
     def mixed(list, map) do
       try do
-        x = hd(list)  # Raises ArgumentError
-        y = Map.fetch!(map, :key)  # Raises KeyError
+        # Raises ArgumentError
+        x = hd(list)
+        # Raises KeyError
+        y = Map.fetch!(map, :key)
         {x, y}
       catch
         :error, %ArgumentError{} -> :caught_arg_error
@@ -62,7 +64,8 @@ defmodule TryCatchTestModules do
     No catch block, exceptions propagate normally.
     """
     def unsafe_hd(list) do
-      hd(list)  # ArgumentError propagates
+      # ArgumentError propagates
+      hd(list)
     end
   end
 
@@ -72,11 +75,13 @@ defmodule TryCatchTestModules do
     """
     def nested(list1, list2) do
       try do
-        x = hd(list1)  # ArgumentError
+        # ArgumentError
+        x = hd(list1)
 
         y =
           try do
-            hd(list2)  # ArgumentError caught by inner try
+            # ArgumentError caught by inner try
+            hd(list2)
           catch
             :error, %ArgumentError{} -> :inner_caught
           end

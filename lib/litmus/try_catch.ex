@@ -114,7 +114,8 @@ defmodule Litmus.TryCatch do
     - `{:ok, %{mfa() => exception_info()}}` - Map of caught exceptions per function
     - `{:error, reason}` - If analysis fails
   """
-  @spec analyze_beam(String.t()) :: {:ok, %{mfa() => Litmus.Exceptions.exception_info()}} | {:error, term()}
+  @spec analyze_beam(String.t()) ::
+          {:ok, %{mfa() => Litmus.Exceptions.exception_info()}} | {:error, term()}
   def analyze_beam(beam_path) do
     charlist_path = String.to_charlist(beam_path)
 
@@ -158,6 +159,25 @@ defmodule Litmus.TryCatch do
     end
   end
 
+  defp extract_core_erlang({:debug_info_v1, backend, data}) do
+    # For Erlang modules or other formats with older backend signature
+    # Try with 4 args first (newer OTP), then fall back to 3 args
+    try do
+      case backend.debug_info(:core_erlang, :fake_module, data, %{}) do
+        {:ok, core_module} -> {:ok, core_module}
+        {:error, reason} -> {:error, reason}
+      end
+    rescue
+      UndefinedFunctionError ->
+        # Fall back to old 3-arg version (shouldn't happen in practice)
+        {:error, :unsupported_backend_version}
+    end
+  end
+
+  defp extract_core_erlang(other) do
+    {:error, {:unsupported_debug_info_format, other}}
+  end
+
   # Compile Erlang abstract format to Core Erlang
   defp compile_abstract_to_core(abstract_code, module) do
     try do
@@ -179,25 +199,6 @@ defmodule Litmus.TryCatch do
     rescue
       error -> {:error, {:core_compilation_error, Exception.message(error)}}
     end
-  end
-
-  defp extract_core_erlang({:debug_info_v1, backend, data}) do
-    # For Erlang modules or other formats with older backend signature
-    # Try with 4 args first (newer OTP), then fall back to 3 args
-    try do
-      case backend.debug_info(:core_erlang, :fake_module, data, %{}) do
-        {:ok, core_module} -> {:ok, core_module}
-        {:error, reason} -> {:error, reason}
-      end
-    rescue
-      UndefinedFunctionError ->
-        # Fall back to old 3-arg version (shouldn't happen in practice)
-        {:error, :unsupported_backend_version}
-    end
-  end
-
-  defp extract_core_erlang(other) do
-    {:error, {:unsupported_debug_info_format, other}}
   end
 
   # Analyze a Core Erlang module to find try/catch in all functions
@@ -233,15 +234,16 @@ defmodule Litmus.TryCatch do
   # Walk the Core Erlang AST to find try expressions
   defp walk_ast(node, acc) do
     # First, check if this node is a try expression
-    new_acc = case :cerl.type(node) do
-      :try ->
-        # Extract what this try/catch catches
-        caught = extract_caught_from_try(node)
-        Litmus.Exceptions.merge(acc, caught)
+    new_acc =
+      case :cerl.type(node) do
+        :try ->
+          # Extract what this try/catch catches
+          caught = extract_caught_from_try(node)
+          Litmus.Exceptions.merge(acc, caught)
 
-      _ ->
-        acc
-    end
+        _ ->
+          acc
+      end
 
     # Then recursively walk all children
     walk_children(node, new_acc)
@@ -250,8 +252,11 @@ defmodule Litmus.TryCatch do
   # Walk all children of a Core Erlang node
   defp walk_children(node, acc) do
     case :cerl.type(node) do
-      :var -> acc
-      :literal -> acc
+      :var ->
+        acc
+
+      :literal ->
+        acc
 
       :cons ->
         acc
@@ -264,6 +269,7 @@ defmodule Litmus.TryCatch do
 
       :map ->
         pairs = :cerl.map_es(node)
+
         Enum.reduce(pairs, acc, fn pair, a ->
           a
           |> walk_ast(:cerl.map_pair_key(pair))
@@ -301,6 +307,7 @@ defmodule Litmus.TryCatch do
       :let ->
         arg = :cerl.let_arg(node)
         body = :cerl.let_body(node)
+
         acc
         |> walk_ast(arg)
         |> walk_ast(body)
@@ -318,6 +325,7 @@ defmodule Litmus.TryCatch do
       :seq ->
         arg = :cerl.seq_arg(node)
         body = :cerl.seq_body(node)
+
         acc
         |> walk_ast(arg)
         |> walk_ast(body)
@@ -326,6 +334,7 @@ defmodule Litmus.TryCatch do
         arg = :cerl.try_arg(node)
         body = :cerl.try_body(node)
         handler = :cerl.try_handler(node)
+
         acc
         |> walk_ast(arg)
         |> walk_ast(body)
@@ -340,15 +349,18 @@ defmodule Litmus.TryCatch do
         timeout = :cerl.receive_timeout(node)
         action = :cerl.receive_action(node)
         acc = Enum.reduce(clauses, acc, &walk_clause/2)
+
         acc
         |> walk_ast(timeout)
         |> walk_ast(action)
 
       :binary ->
         segments = :cerl.binary_segments(node)
+
         Enum.reduce(segments, acc, fn seg, a ->
           val = :cerl.bitstr_val(seg)
           size = :cerl.bitstr_size(seg)
+
           a
           |> walk_ast(val)
           |> walk_ast(size)
@@ -364,6 +376,7 @@ defmodule Litmus.TryCatch do
   defp walk_clause(clause, acc) do
     guard = :cerl.clause_guard(clause)
     body = :cerl.clause_body(clause)
+
     acc
     |> walk_ast(guard)
     |> walk_ast(body)
@@ -488,16 +501,17 @@ defmodule Litmus.TryCatch do
         pairs = :cerl.map_es(exception_pat)
 
         # Find the __struct__ key
-        struct_module = Enum.find_value(pairs, fn pair ->
-          key = :cerl.map_pair_key(pair)
-          val = :cerl.map_pair_val(pair)
+        struct_module =
+          Enum.find_value(pairs, fn pair ->
+            key = :cerl.map_pair_key(pair)
+            val = :cerl.map_pair_val(pair)
 
-          if :cerl.type(key) == :literal and :cerl.concrete(key) == :__struct__ do
-            if :cerl.type(val) == :literal do
-              :cerl.concrete(val)
+            if :cerl.type(key) == :literal and :cerl.concrete(key) == :__struct__ do
+              if :cerl.type(val) == :literal do
+                :cerl.concrete(val)
+              end
             end
-          end
-        end)
+          end)
 
         case struct_module do
           nil ->

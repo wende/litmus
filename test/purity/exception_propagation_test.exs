@@ -13,7 +13,7 @@ defmodule Litmus.ExceptionPropagationTest do
     test "propagates exceptions from callees to callers" do
       {:ok, results} = Litmus.analyze_exceptions(PropagateExample)
 
-      # All three levels should show ArgumentError from String.to_integer!/1
+      # All three levels should show ArgumentError from elem/2 with out of bounds index
       assert Litmus.can_raise?(results, {PropagateExample, :level1, 1}, ArgumentError)
       assert Litmus.can_raise?(results, {PropagateExample, :level2, 1}, ArgumentError)
       assert Litmus.can_raise?(results, {PropagateExample, :level3, 1}, ArgumentError)
@@ -38,7 +38,7 @@ defmodule Litmus.ExceptionPropagationTest do
     test "deep propagation through multiple levels" do
       {:ok, results} = Litmus.analyze_exceptions(DeepPropagateExample)
 
-      # Exception should propagate all the way up
+      # Exception should propagate all the way up (ArgumentError from elem/2 out of bounds)
       assert Litmus.can_raise?(results, {DeepPropagateExample, :top, 1}, ArgumentError)
       assert Litmus.can_raise?(results, {DeepPropagateExample, :middle, 1}, ArgumentError)
       assert Litmus.can_raise?(results, {DeepPropagateExample, :bottom, 1}, ArgumentError)
