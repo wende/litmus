@@ -321,6 +321,7 @@ defmodule Litmus.Effects do
       end
       |> Effects.run(:passthrough)
   """
+  @spec run((any() -> any()), :passthrough | (any() -> any())) :: any()
   def run(effect_fn, handler) when is_function(effect_fn, 1) do
     # Create the actual handler function that will be passed to the effect
     handler_fn =
@@ -345,6 +346,7 @@ defmodule Litmus.Effects do
   @doc """
   Applies an effect signature directly (for passthrough mode).
   """
+  @spec apply_effect({module(), atom(), [any()]}) :: any()
   def apply_effect({module, function, args}) do
     apply(module, function, args)
   end
@@ -363,6 +365,7 @@ defmodule Litmus.Effects do
       end)
       |> Effects.run(:passthrough)
   """
+  @spec map((any() -> any()), (any() -> any())) :: (any() -> any())
   def map(effect_fn, mapper) when is_function(effect_fn, 1) and is_function(mapper, 1) do
     fn handler ->
       effect_fn.(fn effect_sig, cont ->
@@ -387,6 +390,7 @@ defmodule Litmus.Effects do
 
       combined = Effects.compose(file_handler, io_handler)
   """
+  @spec compose((any() -> any()), (any() -> any())) :: (any() -> any())
   def compose(handler1, handler2) do
     fn effect_sig ->
       try do

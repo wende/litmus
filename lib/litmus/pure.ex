@@ -152,6 +152,7 @@ defmodule Litmus.Pure do
   Returns the result of evaluating the block if all functions meet the purity level.
   Raises `Litmus.ImpurityError` at compile time if impure functions are found.
   """
+  @spec pure(keyword, any) :: Macro.t()
   defmacro pure(opts \\ [], do: block) do
     # Get the required purity level (default: :pure)
     level = Keyword.get(opts, :level, :pure)
@@ -276,8 +277,7 @@ defmodule Litmus.Pure do
         try do
           case Litmus.analyze_module(module) do
             {:ok, results} ->
-              case Map.get(results, mfa) do
-                nil -> false
+              case Map.get(results, mfa, :side_effects) do
                 actual_level -> meets_purity_level?(actual_level, required_level)
               end
 
@@ -321,34 +321,31 @@ defmodule Litmus.Pure do
   # Strategy: Trust stdlib whitelist first (it knows about lazy streams, etc.)
   # Only use PURITY analyzer for third-party code
   defp check_termination_with_analyzer({_module, _function, _arity} = mfa, module) do
-    # Check if stdlib has explicit knowledge about this function
-    case Litmus.Stdlib.get_termination(mfa) do
-      :terminating ->
-        true
+    # Check if module is a known stdlib module
+    if module in Litmus.Stdlib.whitelisted_modules() do
+      # Stdlib module: always trust get_termination (it handles all stdlib)
+      case Litmus.Stdlib.get_termination(mfa) do
+        :terminating -> true
+        :non_terminating -> false
+      end
+    else
+      # Third-party module: try PURITY analyzer
+      try do
+        case Litmus.analyze_termination(module) do
+          {:ok, results} ->
+            case Map.get(results, mfa, :terminating) do
+              :terminating -> true
+              :non_terminating -> false
+            end
 
-      :non_terminating ->
-        false
-
-      nil ->
-        # Stdlib doesn't know, try PURITY analyzer
-        try do
-          case Litmus.analyze_termination(module) do
-            {:ok, results} ->
-              case Map.get(results, mfa) do
-                :terminating -> true
-                :non_terminating -> false
-                # Conservative: assume terminates if not found
-                nil -> true
-              end
-
-            {:error, _reason} ->
-              # Can't analyze, assume terminates (conservative)
-              true
-          end
-        rescue
-          # If PURITY crashes, assume terminates (conservative)
-          _ -> true
+          {:error, _reason} ->
+            # Can't analyze, assume terminates (conservative)
+            true
         end
+      rescue
+        # If PURITY crashes, assume terminates (conservative)
+        _ -> true
+      end
     end
   end
 
@@ -894,6 +891,7 @@ defmodule Litmus.Pure do
           IO.puts("Found impure calls: \#{inspect(impure)}")
       end
   """
+  @spec check_purity(Macro.t(), Macro.env() | nil) :: {:ok, [mfa()]} | {:error, [mfa()]}
   def check_purity(ast, env \\ nil) do
     # Expand macros if environment is provided
     expanded_ast = if env, do: Macro.expand(ast, env), else: ast
@@ -930,6 +928,7 @@ defmodule Litmus.Pure do
 
       # Returns: [{Enum, :map, 2}, {String, :upcase, 1}]
   """
+  @spec list_calls(Macro.t(), Macro.env() | nil) :: [mfa()]
   def list_calls(ast, env \\ nil) do
     # Expand macros if environment is provided
     expanded_ast = if env, do: Macro.expand(ast, env), else: ast
