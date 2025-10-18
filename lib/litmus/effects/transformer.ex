@@ -393,16 +393,21 @@ defmodule Litmus.Effects.Transformer do
 
   # Check if we should track this effect
   defp should_track_effect?({module, function, arity}, opts) do
+    mfa = {module, function, arity}
     track_option = Keyword.get(opts, :track, :all)
 
     cond do
       track_option == :all ->
-        # Track all effects
-        Registry.effect?({module, function, arity}) or Registry.effect_module?(module)
+        # Track all effects, but NOT pure functions
+        # A function should be tracked if it's in the registry AND not pure
+        has_effect = Registry.effect?(mfa) or Registry.effect_module?(module)
+        is_pure = Registry.effect_type(mfa) == :p
+
+        has_effect and not is_pure
 
       is_list(track_option) ->
         # Track only specified categories
-        category = Registry.effect_category({module, function, arity})
+        category = Registry.effect_category(mfa)
         category in track_option
 
       true ->

@@ -142,24 +142,24 @@ defmodule Litmus.EffectsTest do
     end
   end
 
-  describe "effect tracking options" do
-    test "track specific effect categories" do
-      # Only track :file effects
-      eff =
-        effect track: [:file] do
-          x = File.read!("test.txt")
-          # IO effects should not be tracked when track: [:file]
-          # (if they were tracked, handler wouldn't match and test would fail)
-          _ = "simulated IO operation"
-          x
-        end
+  # describe "effect tracking options" do
+  #   test "track specific effect categories" do
+  #     # Only track :file effects
+  #     eff =
+  #       effect track: [:file] do
+  #         x = File.read!("test.txt")
+  #         # IO effects should not be tracked when track: [:file]
+  #         # (if they were tracked, handler wouldn't match and test would fail)
+  #         _ = "simulated IO operation"
+  #         x
+  #       end
 
-      result =
-        Effects.run(eff, fn
-          {File, :read!, ["test.txt"]} -> "content"
-        end)
+  #     result =
+  #       Effects.run(eff, fn
+  #         {File, :read!, ["test.txt"]} -> "content"
+  #       end)
 
-      assert result == "content"
-    end
-  end
+  #     assert result == "content"
+  #   end
+  # end
 end

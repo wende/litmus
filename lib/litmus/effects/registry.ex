@@ -3,308 +3,266 @@ defmodule Litmus.Effects.Registry do
   Registry of known side-effectful functions in Elixir and Erlang standard libraries.
 
   This module tracks which functions have side effects and should be intercepted
-  during effect handling. It leverages Litmus's existing purity analysis to identify
-  side-effectful functions.
+  during effect handling. It loads effect information from `.effects.json` at compile time.
+
+  ## IMPORTANT: Standard Library Completeness
+
+  All functions from Elixir and Erlang standard libraries MUST be explicitly defined
+  in `.effects.json`. If a stdlib function is queried but not found in the registry,
+  this module will raise an exception immediately rather than returning `:unknown`.
+
+  This ensures completeness of effect tracking for all standard library functions.
   """
+
+  # Load effects from JSON at compile time
+  @effects_path Path.join(__DIR__, "../../../.effects.json")
+  @external_resource @effects_path
+
+  effects_data =
+    @effects_path
+    |> File.read!()
+    |> Jason.decode!()
+
+  # Build a map of {module, function, arity} => effect_type
+  @effects_map effects_data
+    |> Enum.reject(fn {key, _} -> String.starts_with?(key, "_") end)
+    |> Enum.flat_map(fn {module_name, functions} ->
+      # Convert module name string to atom
+      module = case module_name do
+        "Elixir." <> rest -> Module.concat([rest])
+        name -> String.to_atom(name)
+      end
+
+      # Convert each function entry
+      Enum.map(functions, fn {func_arity, effect} ->
+        # Parse "function/arity" - find the LAST "/" to handle operators like "..", "//", etc.
+        case String.reverse(func_arity) |> String.split("/", parts: 2) do
+          [reversed_arity, reversed_name] ->
+            func_name = String.reverse(reversed_name)
+            arity_str = String.reverse(reversed_arity)
+            func_atom = String.to_atom(func_name)
+            arity = String.to_integer(arity_str)
+
+            {{module, func_atom, arity}, effect}
+
+          _ ->
+            raise "Invalid function/arity format: #{func_arity}"
+        end
+      end)
+    end)
+    |> Map.new()
+
+  # Extract unique modules
+  @effect_modules effects_data
+    |> Map.keys()
+    |> Enum.reject(&String.starts_with?(&1, "_"))
+    |> Enum.map(fn
+      "Elixir." <> rest -> Module.concat([rest])
+      name -> String.to_atom(name)
+    end)
+    |> Enum.uniq()
+
+  # Standard library modules that MUST be fully covered in the registry
+  # Any function from these modules MUST have an explicit effect definition
+  # This list includes all Elixir and Erlang stdlib modules from a bare iex session
+  @elixir_stdlib_modules [
+    # Core data structures (mostly pure)
+    Access, Atom, Base, Bitwise, Date, DateTime, Duration, Enum, Float, Function,
+    Integer, Keyword, List, Map, MapSet, NaiveDateTime, Range, Regex, Stream, String,
+    StringIO, Time, Tuple, URI, Version,
+
+    # I/O and File operations (side effects)
+    File, File.Stat, File.Stream, IO, IO.ANSI, IO.Stream,
+
+    # Process and concurrency (side effects)
+    Agent, Application, Code, DynamicSupervisor, GenEvent, GenServer, Node,
+    PartitionSupervisor, Port, Process, Registry, Supervisor, Task, Task.Supervisor,
+
+    # System operations (side effects)
+    Logger, System,
+
+    # Special modules
+    Kernel, Kernel.SpecialForms,
+
+    # Metaprogramming
+    Macro, Macro.Env, Module,
+
+    # Utilities
+    Calendar, Config, Exception, Inspect, OptionParser, Path, Protocol, Record
+  ]
+
+  @erlang_stdlib_modules [
+    # Core Erlang modules
+    :erlang, :lists, :maps, :sets, :ordsets, :orddict, :sofs,
+    :gb_sets, :gb_trees, :queue, :proplists, :string, :binary, :unicode, :re,
+
+    # I/O and File
+    :file, :filename, :io, :prim_file,
+
+    # Network
+    :inet, :inet_db, :inet_parse, :gen_tcp, :gen_udp, :ssl,
+
+    # Processes and OTP
+    :gen_server, :gen_event, :supervisor, :proc_lib, :sys, :application,
+
+    # ETS and persistence
+    :ets, :dets, :persistent_term, :atomics, :counters,
+
+    # Random and crypto
+    :rand, :random,
+
+    # System
+    :os, :init, :code, :error_logger, :logger,
+
+    # Compression
+    :zlib,
+
+    # RPC
+    :rpc, :global, :global_group,
+
+    # Runtime
+    :erts_internal, :erl_eval, :erl_scan, :erl_parse
+  ]
+
+  @stdlib_modules @elixir_stdlib_modules ++ @erlang_stdlib_modules
+
+  defmodule MissingStdlibEffectError do
+    defexception [:message, :mfa]
+
+    @impl true
+    def exception({module, function, arity}) do
+      message = """
+      Standard library function #{inspect(module)}.#{function}/#{arity} is not defined in the effects registry.
+
+      All Elixir and Erlang standard library functions MUST be explicitly defined in .effects.json.
+
+      To fix this:
+      1. Add the function to .effects.json with its correct effect type (:p, :n, :s, or {:e, [types]})
+      2. If this is a pure function from Kernel, add it to the registry as "p"
+      3. If this function should be tracked, determine its effect and add it
+
+      This is a critical error to ensure completeness of effect tracking.
+      """
+
+      %__MODULE__{message: message, mfa: {module, function, arity}}
+    end
+  end
+
+  @doc """
+  Checks if an MFA is from a standard library module.
+
+  Standard library modules MUST have complete effect coverage in the registry.
+  """
+  def stdlib_function?({module, _function, _arity}) do
+    module in @stdlib_modules
+  end
 
   @doc """
   Returns true if the given MFA (module, function, arity) is a known effect.
 
-  This uses a static registry of known effect modules and functions rather than
-  dynamic purity analysis (which requires runtime results).
+  This uses the effect registry loaded from `.effects.json` at compile time.
+
+  ## Raises
+
+  Raises `MissingStdlibEffectError` if the MFA is from a standard library
+  module but is not defined in the registry.
   """
-  def effect?({module, function, _arity}) do
-    # Check if the module is a known effect module
-    effect_module?(module) or is_known_effect_function?(module, function)
+  def effect?(mfa) do
+    has_effect = Map.has_key?(@effects_map, mfa)
+
+    # If not found and it's a stdlib function, raise an error
+    if not has_effect and stdlib_function?(mfa) do
+      raise MissingStdlibEffectError, mfa
+    end
+
+    has_effect
   end
 
-  defp is_known_effect_function?(module, function) do
-    # Check if this specific function is known to be an effect
-    # even if the module isn't entirely an effect module
-    case {module, function} do
-      # Process effects
-      {Kernel, :send} -> true
-      {Kernel, :spawn} -> true
-      {Kernel, :spawn_link} -> true
-      {Kernel, :spawn_monitor} -> true
-      # Dynamic dispatch is an effect
-      {Kernel, :apply} -> true
-      # Exception-raising functions (can raise, so they're effectful!)
-      # Can raise ArgumentError
-      {Kernel, :hd} -> true
-      # Can raise ArgumentError
-      {Kernel, :tl} -> true
-      # Can raise ArgumentError
-      {Kernel, :elem} -> true
-      # Can raise ArgumentError
-      {Kernel, :put_elem} -> true
-      # Can raise ArithmeticError
-      {Kernel, :div} -> true
-      # Can raise ArithmeticError
-      {Kernel, :rem} -> true
-      # Can raise ArgumentError
-      {Kernel, :binary_part} -> true
-      # Can raise ArgumentError
-      {Kernel, :bit_size} -> true
-      # Can raise ArgumentError
-      {Kernel, :byte_size} -> true
-      # Can raise BadMapError
-      {Kernel, :map_size} -> true
-      # Can raise ArgumentError
-      {Kernel, :tuple_size} -> true
-      # Exits process
-      {Kernel, :exit} -> true
-      # Throws value
-      {Kernel, :throw} -> true
-      # Note: raise/1,2 and reraise/2,3 are macros, not functions
+  @doc """
+  Returns the effect type for a given MFA.
 
-      _ -> false
+  Returns one of:
+  - `:p` - pure (no effects)
+  - `:n` - nif
+  - `:exn` - can raise exceptions
+  - `:s` - side effects (io, file, process, network, state, etc.)
+  - `:u` - unknown
+  - `nil` - not in registry (only for non-stdlib functions)
+
+  ## Raises
+
+  Raises `MissingStdlibEffectError` if the MFA is from a standard library
+  module but is not defined in the registry.
+
+  ## Examples
+
+      iex> effect_type({File, :read!, 1})
+      :s
+
+      iex> effect_type({Kernel, :hd, 1})
+      :exn
+
+      # Non-stdlib function not in registry returns nil
+      iex> effect_type({MyApp.CustomModule, :foo, 1})
+      nil
+
+      # Stdlib function not in registry raises
+      iex> effect_type({File, :undefined_function, 99})
+      ** (Litmus.Effects.Registry.MissingStdlibEffectError) ...
+  """
+  def effect_type(mfa) do
+    case Map.get(@effects_map, mfa) do
+      nil ->
+        # If it's a stdlib function and not in registry, this is an error
+        # UNLESS we're in permissive mode (during registry generation)
+        if stdlib_function?(mfa) and not permissive_mode?() do
+          raise MissingStdlibEffectError, mfa
+        end
+        nil
+
+      "p" -> :p
+      "n" -> :n
+      "s" -> :s
+      "u" -> :u
+      %{"e" => ["exn"]} -> :exn
+      %{"e" => _} -> :exn
+      _ -> :u
     end
+  end
+
+  @doc """
+  Enables permissive mode where missing stdlib functions return nil instead of raising.
+  This is used during registry generation to avoid circular dependency issues.
+  """
+  def set_permissive_mode(enabled) do
+    Process.put(:litmus_registry_permissive, enabled)
+  end
+
+  defp permissive_mode?() do
+    Process.get(:litmus_registry_permissive, false)
   end
 
   @doc """
   Returns the effect category for a given MFA.
 
+  This is a legacy function that maps effect types to more specific categories.
+  For new code, use `effect_type/1` instead.
+
   Categories:
-  - `:io` - Input/output operations
-  - `:file` - File system operations
-  - `:process` - Process creation, messaging, monitoring
-  - `:network` - Network operations
-  - `:ets` - ETS/DETS table operations
-  - `:random` - Random number generation
-  - `:time` - Time/clock access
-  - `:system` - System information access
+  - `:exception` - Can raise exceptions
+  - `:side_effects` - Has side effects (I/O, file, process, network, state, etc.)
   - `:nif` - Native implemented functions
   - `:unknown` - Unknown or unclassified effects
+  - `:pure` - Pure function (no effects)
   """
-  def effect_category({module, function, _arity}) do
-    case {module, function} do
-      # File operations
-      {File, fun}
-      when fun in [
-             :read,
-             :read!,
-             :write,
-             :write!,
-             :open,
-             :close,
-             :rm,
-             :rm_rf,
-             :mkdir,
-             :mkdir_p,
-             :cp,
-             :cp_r,
-             :ls,
-             :stat,
-             :exists?,
-             :dir?,
-             :regular?,
-             :stream!,
-             :chmod,
-             :chown,
-             :touch
-           ] ->
-        :file
-
-      # IO operations
-      {IO, fun}
-      when fun in [
-             :puts,
-             :write,
-             :gets,
-             :read,
-             :inspect,
-             :warn,
-             :getn,
-             :binread,
-             :binwrite,
-             :stream
-           ] ->
-        :io
-
-      # Process operations
-      {Process, fun}
-      when fun in [
-             :send,
-             :spawn,
-             :spawn_link,
-             :spawn_monitor,
-             :exit,
-             :register,
-             :unregister,
-             :whereis,
-             :link,
-             :unlink,
-             :monitor,
-             :demonitor,
-             :flag,
-             :send_after,
-             :cancel_timer
-           ] ->
-        :process
-
-      {Kernel, :send} ->
-        :process
-
-      {Kernel, :spawn} ->
-        :process
-
-      {Kernel, :spawn_link} ->
-        :process
-
-      {Kernel, :spawn_monitor} ->
-        :process
-
-      # Exception-raising Kernel functions
-      {Kernel, fun}
-      when fun in [
-             :hd,
-             :tl,
-             :elem,
-             :put_elem,
-             :div,
-             :rem,
-             :binary_part,
-             :bit_size,
-             :byte_size,
-             :map_size,
-             :tuple_size,
-             :exit,
-             :throw
-           ] ->
-        :exception
-
-      # Erlang process operations
-      {:erlang, fun}
-      when fun in [
-             :send,
-             :spawn,
-             :spawn_link,
-             :spawn_monitor,
-             :spawn_opt,
-             :register,
-             :unregister,
-             :whereis,
-             :link,
-             :unlink,
-             :monitor,
-             :demonitor,
-             :send_after,
-             :cancel_timer,
-             :process_flag
-           ] ->
-        :process
-
-      # Network operations
-      {:gen_tcp, _} ->
-        :network
-
-      {:gen_udp, _} ->
-        :network
-
-      {:inet, _} ->
-        :network
-
-      {:ssl, _} ->
-        :network
-
-      # ETS operations
-      {:ets, fun}
-      when fun in [
-             :new,
-             :insert,
-             :lookup,
-             :delete,
-             :delete_all_objects,
-             :match,
-             :select,
-             :tab2list,
-             :info,
-             :rename
-           ] ->
-        :ets
-
-      {:dets, fun}
-      when fun in [:open_file, :close, :insert, :lookup, :delete, :match, :select, :sync, :info] ->
-        :ets
-
-      # Random operations
-      {:rand, _} ->
-        :random
-
-      {:random, _} ->
-        :random
-
-      # Time operations
-      {:erlang, fun}
-      when fun in [
-             :now,
-             :system_time,
-             :monotonic_time,
-             :timestamp,
-             :time_offset,
-             :universaltime,
-             :localtime
-           ] ->
-        :time
-
-      {System, fun} when fun in [:system_time, :monotonic_time, :os_time, :unique_integer] ->
-        :time
-
-      # System operations
-      {System, fun} when fun in [:get_env, :put_env, :delete_env, :cmd, :halt, :stop] ->
-        :system
-
-      {:os, fun} when fun in [:getenv, :putenv, :unsetenv, :cmd, :system_time] ->
-        :system
-
-      # Port operations
-      {Port, _} ->
-        :process
-
-      {:erlang, fun} when fun in [:open_port, :port_close, :port_command, :port_connect] ->
-        :process
-
-      # Code loading/compilation
-      {Code, fun}
-      when fun in [
-             :compile_file,
-             :compile_string,
-             :eval_file,
-             :eval_string,
-             :require_file,
-             :load_file
-           ] ->
-        :system
-
-      # Agent operations
-      {Agent, _} ->
-        :process
-
-      # Task operations
-      {Task, fun} when fun in [:start, :start_link, :async, :async_stream] ->
-        :process
-
-      # GenServer operations
-      {GenServer, fun} when fun in [:start, :start_link, :call, :cast, :stop] ->
-        :process
-
-      # Supervisor operations
-      {Supervisor, fun}
-      when fun in [:start_link, :start_child, :terminate_child, :delete_child, :restart_child] ->
-        :process
-
-      # Application operations
-      {Application, fun} when fun in [:start, :stop, :load, :unload, :put_env, :delete_env] ->
-        :system
-
-      # Logger operations
-      {Logger, _} ->
-        :io
-
-      # Default: unknown
-      _ ->
-        :unknown
+  def effect_category(mfa) do
+    case effect_type(mfa) do
+      :p -> :pure
+      :n -> :nif
+      :exn -> :exception
+      :s -> :side_effects
+      :u -> :unknown
+      nil -> :unknown
     end
   end
 
@@ -312,36 +270,29 @@ defmodule Litmus.Effects.Registry do
   Returns a list of all registered effect modules.
   """
   def effect_modules do
-    [
-      File,
-      IO,
-      Process,
-      Port,
-      Agent,
-      Task,
-      GenServer,
-      Supervisor,
-      Application,
-      Logger,
-      System,
-      Code,
-      :gen_tcp,
-      :gen_udp,
-      :inet,
-      :ssl,
-      :ets,
-      :dets,
-      :rand,
-      :random,
-      :os,
-      :erlang
-    ]
+    @effect_modules
   end
 
   @doc """
   Checks if a module is known to contain effects.
   """
   def effect_module?(module) do
-    module in effect_modules()
+    module in @effect_modules
+  end
+
+  @doc """
+  Returns all MFAs in the effect registry.
+  """
+  def all_effects do
+    Map.keys(@effects_map)
+  end
+
+  @doc """
+  Returns the raw effects map loaded from .effects.json.
+
+  This is useful for debugging or advanced use cases.
+  """
+  def effects_map do
+    @effects_map
   end
 end

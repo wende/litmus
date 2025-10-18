@@ -1,0 +1,8 @@
+{
+  "unknown_module :purity_hofs",
+  "unknown_function :purity_collect.file/1",
+  "unknown_function :purity_analyse.propagate_termination/2",
+  "unknown_function :purity_analyse.propagate_both/2",
+  "pattern_match lib/litmus/pure.ex:1",
+  "no_return src/purity_analyse.erl:203"
+}.

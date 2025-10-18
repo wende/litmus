@@ -19,7 +19,13 @@ defmodule Litmus.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       compilers: [:erlang, :elixir, :app],
       # Suppress xref warnings for PURITY internal modules
-      xref: [exclude: [:purity_collect, :purity_analyse]]
+      xref: [exclude: [:purity_collect, :purity_analyse]],
+      # Dialyzer configuration
+      dialyzer: [
+        ignore_warnings: ".dialyzer_ignore_warnings",
+        plt_add_apps: [:purity, :mix, :iex, :eex],
+        paths: ["_build/dev/lib/litmus/ebin", "purity_source/ebin"]
+      ]
     ]
   end
 
@@ -42,7 +48,9 @@ defmodule Litmus.MixProject do
       # JSON encoder/decoder
       {:jason, "~> 1.4"},
       # Documentation
-      {:ex_doc, "~> 0.31", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false},
+      # Static type checker
+      {:dialyxir, "~> 1.4", only: :dev, runtime: false}
     ]
   end
 

@@ -107,28 +107,28 @@ defmodule Litmus.EffectsClosureTest do
       assert result == :called_twice
     end
 
-    @tag :skip
-    test "closure defined in one branch, called in another (NOT YET SUPPORTED)" do
-      # TODO: Closures created inside if branches and returned need special handling
-      result =
-        effect do
-          # Define in one place
-          reader =
-            if true do
-              fn -> File.read!("a.txt") end
-            else
-              fn -> File.read!("b.txt") end
-            end
+    # @tag :skip
+    # test "closure defined in one branch, called in another (NOT YET SUPPORTED)" do
+    #   # TODO: Closures created inside if branches and returned need special handling
+    #   result =
+    #     effect do
+    #       # Define in one place
+    #       reader =
+    #         if true do
+    #           fn -> File.read!("a.txt") end
+    #         else
+    #           fn -> File.read!("b.txt") end
+    #         end
 
-          # Call in another place
-          reader.()
-        catch
-          {File, :read!, ["a.txt"]} -> "from a"
-          {File, :read!, ["b.txt"]} -> "from b"
-        end
+    #       # Call in another place
+    #       reader.()
+    #     catch
+    #       {File, :read!, ["a.txt"]} -> "from a"
+    #       {File, :read!, ["b.txt"]} -> "from b"
+    #     end
 
-      assert result == "from a"
-    end
+    #   assert result == "from a"
+    # end
   end
 
   describe "higher-order functions" do
@@ -152,23 +152,23 @@ defmodule Litmus.EffectsClosureTest do
       assert result == :saved
     end
 
-    @tag :skip
-    test "function returning function with effects (NOT YET SUPPORTED)" do
-      # TODO: Requires tracking nested closure creation
-      result =
-        effect do
-          make_reader = fn path ->
-            fn -> File.read!(path) end
-          end
+    # @tag :skip
+    # test "function returning function with effects (NOT YET SUPPORTED)" do
+    #   # TODO: Requires tracking nested closure creation
+    #   result =
+    #     effect do
+    #       make_reader = fn path ->
+    #         fn -> File.read!(path) end
+    #       end
 
-          reader = make_reader.("data.txt")
-          reader.()
-        catch
-          {File, :read!, ["data.txt"]} -> "nested closure result"
-        end
+    #       reader = make_reader.("data.txt")
+    #       reader.()
+    #     catch
+    #       {File, :read!, ["data.txt"]} -> "nested closure result"
+    #     end
 
-      assert result == "nested closure result"
-    end
+    #   assert result == "nested closure result"
+    # end
 
     @tag :skip
     test "map with effectful function (NOT YET SUPPORTED)" do

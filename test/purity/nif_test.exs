@@ -34,17 +34,15 @@ defmodule Litmus.NifTest do
 
     test "analyzes a simple module that calls crypto (indirect NIF)" do
       # Create a module that calls crypto functions
-      code = """
-      defmodule CryptoUser do
-        def hash_data(data) do
-          :crypto.hash(:sha256, data)
+      [{module, _bytecode}] = Code.compile_quoted(quote do
+        defmodule CryptoUser do
+          def hash_data(data) do
+            :crypto.hash(:sha256, data)
+          end
+
+          def pure_function(x), do: x * 2
         end
-
-        def pure_function(x), do: x * 2
-      end
-      """
-
-      [{module, _bytecode}] = Code.compile_string(code)
+      end)
 
       # Suppress PURITY's stderr output about NIFs
       capture_io(:stderr, fn ->

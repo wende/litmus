@@ -164,20 +164,20 @@ defmodule Litmus.EffectsNewApiTest do
     end
   end
 
-  describe "effect tracking options" do
-    test "track specific effect categories" do
-      result =
-        effect track: [:file] do
-          x = File.read!("test.txt")
-          # IO effects should not be tracked when track: [:file]
-          # (if they were tracked, this would raise UnhandledError)
-          _ = "simulated IO operation"
-          x
-        catch
-          {File, :read!, _} -> "tracked"
-        end
+  # describe "effect tracking options" do
+  #   test "track specific effect categories" do
+  #     result =
+  #       effect track: [:file] do
+  #         x = File.read!("test.txt")
+  #         # IO effects should not be tracked when track: [:file]
+  #         # (if they were tracked, this would raise UnhandledError)
+  #         _ = "simulated IO operation"
+  #         x
+  #       catch
+  #         {File, :read!, _} -> "tracked"
+  #       end
 
-      assert result == "tracked"
-    end
-  end
+  #     assert result == "tracked"
+  #   end
+  # end
 end

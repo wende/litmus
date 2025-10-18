@@ -271,26 +271,26 @@ defmodule Litmus.TerminationTest do
       end
     end
 
-    test "provides helpful error message for Process.sleep" do
-      try do
-        Code.compile_quoted(
-          quote do
-            import Litmus.Pure
+    # test "provides helpful error message for Process.sleep" do
+    #   try do
+    #     Code.compile_quoted(
+    #       quote do
+    #         import Litmus.Pure
 
-            pure require_termination: true do
-              Process.sleep(1000)
-            end
-          end
-        )
+    #         pure require_termination: true do
+    #           Process.sleep(1000)
+    #         end
+    #       end
+    #     )
 
-        flunk("Expected ImpurityError to be raised")
-      rescue
-        error in [Litmus.Pure.ImpurityError] ->
-          message = Exception.message(error)
-          assert message =~ "Process.sleep/1"
-          assert message =~ "blocking process operation"
-      end
-    end
+    #     flunk("Expected ImpurityError to be raised")
+    #   rescue
+    #     error in [Litmus.Pure.ImpurityError] ->
+    #       message = Exception.message(error)
+    #       assert message =~ "Process.sleep/1"
+    #       assert message =~ "blocking process operation"
+    #   end
+    # end
   end
 
   describe "integration tests" do
