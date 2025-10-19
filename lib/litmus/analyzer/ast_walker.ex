@@ -10,6 +10,7 @@ defmodule Litmus.Analyzer.ASTWalker do
   alias Litmus.Inference.{Bidirectional, Context}
   alias Litmus.Types.Core
   alias Litmus.Analyzer.EffectTracker
+  alias Litmus.Formatter
 
   @type analysis_result :: %{
     module: module(),
@@ -166,8 +167,15 @@ defmodule Litmus.Analyzer.ASTWalker do
         # Analyze function body
         case Bidirectional.synthesize(expanded_body, param_context) do
           {:ok, body_type, body_effect, _subst} ->
+            # Detect if this is a lambda-dependent function:
+            # A function is lambda-dependent if:
+            # 1. It has function-typed parameters
+            # 2. Its effect contains effect variables (indicating unknown effects from calling those parameters)
+            # 3. It has no other concrete effects
+            final_effect = classify_effect(body_effect, param_types)
+
             # Build function type
-            fun_type = build_function_type(param_types, body_type, body_effect)
+            fun_type = build_function_type(param_types, body_type, final_effect)
 
             # Track function calls in body
             calls = EffectTracker.extract_calls(body)
@@ -175,7 +183,7 @@ defmodule Litmus.Analyzer.ASTWalker do
             # Create function analysis
             func_analysis = %{
               type: fun_type,
-              effect: body_effect,
+              effect: final_effect,
               params: param_types,
               return_type: body_type,
               calls: calls,
@@ -187,7 +195,7 @@ defmodule Litmus.Analyzer.ASTWalker do
             updated_result = result
                              |> Map.update!(:functions, &Map.put(&1, mfa, func_analysis))
                              |> Map.update!(:types, &Map.put(&1, mfa, fun_type))
-                             |> Map.update!(:effects, &Map.put(&1, mfa, body_effect))
+                             |> Map.update!(:effects, &Map.put(&1, mfa, final_effect))
 
             # Add function to context for recursive calls
             new_context = Context.add(context, name, fun_type)
@@ -278,6 +286,32 @@ defmodule Litmus.Analyzer.ASTWalker do
     Core.function_type({:tuple, params}, effect, return_type)
   end
 
+  # Classify effect based on parameter types and effect structure
+  # Converts effect variables to lambda-dependent when appropriate
+  defp classify_effect(effect, param_types) do
+    # Check if any parameters are functions
+    has_function_params = Enum.any?(param_types, fn
+      {:function, _, _, _} -> true
+      {:type_var, _} -> true  # Could be a function
+      _ -> false
+    end)
+
+    # Check if effect contains only variables (no concrete effects)
+    only_vars = case effect do
+      {:effect_var, _} -> true
+      {:effect_empty} -> false
+      _ -> false
+    end
+
+    # If function has function parameters and effect is just variables,
+    # mark it as lambda-dependent
+    if has_function_params and only_vars do
+      {:effect_label, :lambda}
+    else
+      effect
+    end
+  end
+
   # Extract module name from AST
   defp extract_module_name({:__aliases__, _, parts}) do
     Module.concat(parts)
@@ -321,11 +355,11 @@ defmodule Litmus.Analyzer.ASTWalker do
 
   # Format error for display
   defp format_error({:cannot_unify, t1, t2}) do
-    "Cannot unify types: #{Core.format_type(t1)} with #{Core.format_type(t2)}"
+    "Cannot unify types: #{Formatter.format_type(t1)} with #{Formatter.format_type(t2)}"
   end
 
   defp format_error({:cannot_unify_effects, e1, e2}) do
-    "Cannot unify effects: #{Core.format_effect(e1)} with #{Core.format_effect(e2)}"
+    "Cannot unify effects: #{Formatter.format_effect(e1)} with #{Formatter.format_effect(e2)}"
   end
 
   defp format_error({:undefined_variable, var}) do
@@ -333,15 +367,12 @@ defmodule Litmus.Analyzer.ASTWalker do
   end
 
   defp format_error({:occurs_check_failed, var, type}) do
-    "Infinite type: #{format_var(var)} occurs in #{Core.format_type(type)}"
+    "Infinite type: #{Formatter.format_var(var)} occurs in #{Formatter.format_type(type)}"
   end
 
   defp format_error(error) do
     "Type inference error: #{inspect(error)}"
   end
-
-  defp format_var({:type_var, name}), do: to_string(name)
-  defp format_var({:effect_var, name}), do: to_string(name)
 
   @doc """
   Analyzes multiple files in parallel.
@@ -382,8 +413,8 @@ defmodule Litmus.Analyzer.ASTWalker do
 
     functions_str = functions
                     |> Enum.map(fn {{_m, f, a}, analysis} ->
-                      type_str = Core.format_type(analysis.type)
-                      effect_str = Core.format_effect(analysis.effect)
+                      type_str = Formatter.format_type(analysis.type)
+                      effect_str = Formatter.format_effect(analysis.effect)
                       visibility = if analysis[:visibility] == :defp, do: " (private)", else: ""
                       "  #{f}/#{a}#{visibility}:\n    Type: #{type_str}\n    Effect: #{effect_str}"
                     end)

@@ -1,42 +1,190 @@
 # Litmus - Purity Analysis and Exception Tracking for Elixir
 
-**Litmus** extends the [PURITY static analyzer](https://github.com/mpitid/purity) with comprehensive exception tracking for Elixir. It analyzes compiled BEAM bytecode to classify functions by purity level and tracks which exceptions they may raise, enabling fine-grained control over exception policies in pure code.
+**Litmus** is a comprehensive static analysis tool for Elixir that provides four powerful capabilities:
 
-This project demonstrates concepts from the accompanying [whitepaper on purity analysis for Elixir](./whitepaper.md), proving that exception tracking is practical and achievable on the BEAM.
+1. **Purity Analysis** - Classifies functions as pure or impure by analyzing BEAM bytecode
+2. **Exception Tracking** - Tracks which exceptions each function may raise
+3. **Algebraic Effects** - Mock and intercept side effects for testing using compile-time transformation
+4. **Bidirectional Type Inference** - Infers effect types directly from Elixir source code with lambda effect propagation
 
-## What is Purity Analysis?
+Built on the [PURITY static analyzer](https://github.com/mpitid/purity), Litmus extends it with exception tracking and a powerful effects system, proving that fine-grained effect analysis is practical on the BEAM.
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Core Concepts](#core-concepts)
+  - [What is Purity Analysis?](#what-is-purity-analysis)
+  - [Effect Types Reference](#effect-types-reference)
+  - [Analysis Result Levels](#analysis-result-levels)
+- [Four Main Features](#four-main-features)
+  - [1. Purity Analysis](#1-purity-analysis)
+  - [2. Exception Tracking](#2-exception-tracking)
+  - [3. Algebraic Effects System](#3-algebraic-effects-system)
+  - [4. Bidirectional Type Inference](#4-bidirectional-type-inference)
+- [Mix Tasks](#mix-tasks)
+- [Termination Analysis](#termination-analysis)
+- [Installation](#installation)
+- [Known Limitations](#known-limitations)
+
+## Quick Start
+
+```elixir
+# Add to mix.exs
+{:litmus, github: "wende/litmus", tag: "v0.1.0"}
+
+# Analyze a module for purity
+{:ok, results} = Litmus.analyze_module(:lists)
+Litmus.pure?(results, {:lists, :reverse, 1})  #=> true
+
+# Enforce purity at compile-time
+import Litmus.Pure
+pure do
+  [1, 2, 3] |> Enum.map(&(&1 * 2)) |> Enum.sum()
+end
+
+# Mock side effects for testing
+import Litmus.Effects
+effect do
+  File.read!("config.json")
+catch
+  {File, :read!, _} -> ~s({"test": "data"})
+end
+```
+
+## Core Concepts
+
+### What is Purity Analysis?
 
 Purity analysis determines whether functions are **referentially transparent** (pure) or have **side effects** (impure). Pure functions:
 - Always return the same output for the same input
 - Have no observable side effects (no I/O, no state mutations, no process operations)
 - Can be safely optimized, memoized, and parallelized
 
-## Purity Levels
+### Effect Types Reference
 
-Litmus classifies functions into purity levels:
+Litmus uses a standardized set of **effect types** stored in `.effects.json` to classify all standard library functions:
+
+| Type | Name | Description | Examples |
+|------|------|-------------|----------|
+| **`"p"`** | Pure | Referentially transparent, no side effects | `Enum.map/2`, `String.upcase/1`, `+/2` |
+| **`"d"`** | Dependent | Depends on execution environment/context | `node/0`, `self/0` |
+| **`"n"`** | NIF | Native code, behavior unknown | `:crypto` functions |
+| **`"s"`** | Stateful | Writes/modifies state | `File.write!/2`, `IO.puts/1`, `send/2` |
+| **`"l"`** | Lambda | May inherit effects from passed functions | `Enum.map/2` (higher-order) |
+| **`"u"`** | Unknown | Cannot be analyzed | Dynamic dispatch, missing debug_info |
+| **`{"e", [...]}`** | Exceptions | May raise specific exceptions | `{"e", ["Elixir.ArgumentError"]}` |
+
+**Note:** Functions can have multiple effect types. For example, `Enum.map/2` is both `"p"` (pure when given pure functions) and `"l"` (lambda - inherits effects from the function argument).
+
+### Analysis Result Levels
+
+When analyzing compiled modules, Litmus returns one of these **analysis result levels**:
 
 - **`:pure`** - Referentially transparent, no side effects, no exceptions
 - **`:exceptions`** - Side-effect free but may raise exceptions
+- **`:lambda`** - Side-effect free but may inherit effects from passed functions
 - **`:dependent`** - Side-effect free but depends on execution environment (e.g., `node/0`)
 - **`:nif`** - Native code (behavior unknown, conservative assumption)
 - **`:side_effects`** - Has observable side effects (I/O, process operations, etc.)
 - **`:unknown`** - Cannot be analyzed (dynamic dispatch, missing debug_info)
 
-## Exception Tracking
+## Four Main Features
 
-**New in v0.1.0**: Litmus tracks exceptions independently from purity, distinguishing between:
+### 1. Purity Analysis
 
+Analyze BEAM bytecode to determine if functions are pure or have side effects.
+
+```elixir
+# Analyze a single module
+{:ok, results} = Litmus.analyze_module(:lists)
+
+# Check if a function is pure
+Litmus.pure?(results, {:lists, :reverse, 1})  #=> true
+
+# Get detailed purity level
+{:ok, level} = Litmus.get_purity(results, {:lists, :map, 2})
+#=> {:ok, :pure}
+
+# Analyze multiple modules in parallel
+{:ok, results} = Litmus.analyze_parallel([:lists, :string, :maps])
+```
+
+**Elixir Standard Library Whitelist:** Litmus includes a manually curated whitelist of pure stdlib functions for instant checking without bytecode analysis:
+
+```elixir
+Litmus.pure_stdlib?({Enum, :map, 2})     #=> true
+Litmus.pure_stdlib?({String, :upcase, 1}) #=> true
+Litmus.pure_stdlib?({IO, :puts, 1})       #=> false
+```
+
+**Compile-Time Enforcement:** Use the `pure` macro to enforce purity at compile time:
+
+```elixir
+import Litmus.Pure
+
+# ✅ This compiles successfully
+result = pure do
+  [1, 2, 3]
+  |> Enum.map(&(&1 * 2))
+  |> Enum.filter(&(&1 > 5))
+  |> Enum.sum()
+end
+
+# ❌ This fails at compile time
+pure do
+  IO.puts("Hello")  # Compilation error!
+end
+```
+
+### 2. Exception Tracking
+
+Track which exceptions each function may raise, independently from purity analysis.
+
+**Exception Types:**
 - **Typed exceptions** (`:error` class) - ArgumentError, KeyError, etc. with known module types
 - **Untyped exceptions** (`:throw`/`:exit` classes) - Arbitrary values used for control flow
-- **Dynamic exceptions** (`:dynamic`) - Exceptions raised but type cannot be determined statically (e.g., `raise variable`)
+- **Dynamic exceptions** (`:dynamic`) - Type cannot be determined statically (e.g., `raise variable`)
 
-Exception information propagates through call graphs and can be queried per-function, enabling compile-time enforcement of exception policies.
+```elixir
+# Analyze exceptions for a module
+{:ok, exceptions} = Litmus.analyze_exceptions(MyModule)
 
-## Algebraic Effects System
+# Check if a function can raise a specific exception
+Litmus.can_raise?(exceptions, {MyModule, :parse, 1}, ArgumentError)
+#=> true
 
-**New in v0.2.0**: Litmus includes a powerful **algebraic effects system** for testing and mocking side effects. Using continuation-passing style (CPS) transformation, you can intercept and mock any side effect at compile time.
+# Get detailed exception information
+{:ok, info} = Litmus.get_exceptions(exceptions, {MyModule, :parse, 1})
+#=> {:ok, %{
+#=>   errors: MapSet.new([ArgumentError, KeyError]),
+#=>   non_errors: false
+#=> }}
+```
 
-### Basic Usage
+**Exception Policies:** Control which exceptions are allowed in pure blocks:
+
+```elixir
+# Allow specific exceptions in pure code
+pure allow_exceptions: [ArgumentError, KeyError] do
+  Map.fetch!(data, :key) |> String.to_integer!()
+end
+
+# Allow any exceptions but forbid I/O
+pure allow_exceptions: :any do
+  Integer.parse!(user_input)
+end
+
+# Forbid all exceptions (default)
+pure allow_exceptions: :none do
+  Enum.sum([1, 2, 3])  # ✅ Safe
+end
+```
+
+### 3. Algebraic Effects System
+
+Mock and intercept side effects for testing using continuation-passing style (CPS) transformation at compile time.
+
+**Basic Usage:**
 
 ```elixir
 import Litmus.Effects
@@ -55,93 +203,55 @@ end
 assert result == :ok
 ```
 
-### How It Works
-
-The `effect` macro transforms your code using **continuation-passing style (CPS)**:
+**How It Works:** The `effect` macro transforms your code using continuation-passing style (CPS):
 
 ```elixir
-# You write this:
+# You write:
 effect do
   x = File.read!("a.txt")
   y = String.upcase(x)
   File.write!("b.txt", y)
 catch
   {File, :read!, _} -> "mocked"
-  {File, :write!, _} -> :ok
 end
 
 # It transforms to (conceptually):
 handler.({File, :read!, ["a.txt"]}, fn x ->
   y = String.upcase(x)  # Pure code runs normally
-  handler.({File, :write!, ["b.txt", y]}, fn _result ->
-    :ok
-  end)
+  handler.({File, :write!, ["b.txt", y]}, fn result -> result end)
 end)
 ```
 
-### Supported Features
-
-#### Control Flow with Effects
+**Key Features:**
 
 ```elixir
+# Control flow with effects (if/else)
 effect do
-  x = if use_cache? do
-    File.read!("cache.txt")
-  else
-    fetch_from_network!()
-  end
-
+  x = if use_cache?, do: File.read!("cache.txt"), else: fetch!()
   process(x)
 catch
-  {File, :read!, _} -> "cached data"
-  {:http, :get, _} -> "network data"
+  {File, :read!, _} -> "cached"
 end
-```
 
-#### Anonymous Functions with Effects
-
-```elixir
-effect do
-  handler = fn
-    :read -> File.read!("data.txt")
-    :write -> File.write!("output.txt", "data")
-  end
-
-  handler.(:read)
-catch
-  {File, :read!, _} -> "mocked read"
-end
-```
-
-#### Variable Capture in Handlers
-
-```elixir
+# Variable capture in handlers
 effect do
   File.write!("log.txt", "message")
 catch
   {File, :write!, [path, content]} ->
-    assert path == "log.txt"
-    assert content == "message"
+    assert path == "log.txt"  # Can inspect arguments
     :ok
 end
-```
 
-#### Selective Effect Tracking
-
-```elixir
-# Only track file operations, ignore IO
+# Selective effect tracking - only track specific categories
 effect track: [:file] do
-  x = File.read!("test.txt")
-  IO.puts("Debug: #{x}")  # Not tracked, executes normally
-  x
+  File.read!("test.txt")
+  IO.puts("Debug")  # Not tracked, executes normally
 catch
   {File, :read!, _} -> "mocked"
 end
 ```
 
-### Effect Categories
-
-Effects are categorized for selective tracking:
+**Effect Categories:**
 
 - **`:file`** - File operations (`File`, `Path`)
 - **`:io`** - Console I/O (`IO`)
@@ -150,30 +260,216 @@ Effects are categorized for selective tracking:
 - **`:database`** - Database operations (`Ecto`, `Repo`)
 - **`:exception`** - Exception-raising Kernel functions (`hd/1`, `elem/2`, `div/2`, etc.)
 
-### Testing Benefits
+**Testing Benefits:**
+- No filesystem access, no network calls, deterministic tests
+- Fast tests with no I/O waiting
+- Clear test intent through effect signatures
+- Zero runtime overhead (compile-time transformation)
 
-- **No filesystem access** - Mock all file operations
-- **No network calls** - Test HTTP clients without servers
-- **Deterministic tests** - Control all side effects explicitly
-- **Fast tests** - No waiting for I/O
-- **Clear test intent** - Effect signatures document what's being tested
+**Current Limitations:** `case`, `cond`, `with` expressions, effects in `Enum.map`, and nested closures not yet supported. See `test/effects/` for examples.
 
-### Limitations
+### 4. Bidirectional Type Inference
 
-Currently **not supported** (future work):
+Analyze Elixir source code directly to infer effect types with support for lambda effect propagation in higher-order functions.
 
-- ❌ `case`, `cond`, `with` expressions (use `if` for now)
-- ❌ Effects in `Enum.map` and similar higher-order functions
-- ❌ Functions returning functions with effects
-- ❌ Nested closure tracking across branches
+**Key Capabilities:**
 
-See `test/effects/effects_closure_test.exs` for working examples and `@tag :skip` for planned features.
+- Analyzes AST directly (no BEAM bytecode required)
+- Infers effect types for user-defined functions
+- **Lambda effect propagation** - Correctly tracks how effects flow through higher-order functions like `Enum.map`
+- **Cross-module analysis** - Understands effects across your entire application
+- **Compile-time integration** - Results available during compilation
 
-### Performance
+**Basic Usage:**
 
-- **Zero runtime overhead** - Transformation happens at compile time
-- **No macros to expand at runtime** - Generated code is plain Elixir
-- **Inlined continuations** - Compiler can optimize the CPS-transformed code
+```elixir
+alias Litmus.Analyzer.ASTWalker
+alias Litmus.Types.Core
+
+# Analyze a source file
+{:ok, source} = File.read("lib/my_module.ex")
+{:ok, ast} = Code.string_to_quoted(source)
+{:ok, result} = ASTWalker.analyze_ast(ast)
+
+# Get effect information for a function
+mfa = {MyModule, :process, 1}
+func_analysis = result.functions[mfa]
+
+# Check effect type (compact notation: :p, :s, :l, :d, :u)
+effect_type = Core.to_compact_effect(func_analysis.effect)
+```
+
+**Lambda Effect Propagation:**
+
+```elixir
+# These functions analyze correctly with lambda effect propagation:
+
+# Pure function with pure lambda - result is pure (:p)
+pure_map = Enum.map([1, 2, 3], fn x -> x * 2 end)
+
+# Pure function with effectful lambda - result is effectful (:s)
+effectful_map = Enum.map([1, 2, 3], fn x ->
+  IO.puts(x)  # Side effect
+  x * 2
+end)
+
+# Lambda-dependent function - caller determines effects
+def process_items(items, processor) do
+  Enum.map(items, processor)  # Effect depends on what processor does
+end
+```
+
+**Mix Task:**
+
+Use `mix effect` to analyze files from the command line:
+
+```bash
+# Analyze a single file
+mix effect lib/my_module.ex
+
+# Verbose output with types
+mix effect lib/my_module.ex --verbose
+
+# Include exception information
+mix effect lib/my_module.ex --exceptions
+
+# JSON output for tooling
+mix effect lib/my_module.ex --json
+
+# Include PURITY bytecode analysis
+mix effect lib/my_module.ex --purity
+```
+
+The analysis automatically discovers and analyzes all application source files to understand cross-module effects.
+
+## Mix Tasks
+
+Litmus provides `mix effect` for analyzing Elixir source files directly from the command line.
+
+### mix effect
+
+Analyzes an Elixir file and displays all functions with their inferred effect types and exceptions.
+
+**Usage:**
+
+```bash
+mix effect path/to/file.ex [options]
+```
+
+**Options:**
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--verbose` | `-v` | Show detailed analysis including type information and all function calls |
+| `--json` | | Output results in JSON format for tool integration |
+| `--exceptions` | | Include exception tracking from BEAM analysis |
+| `--purity` | | Include purity analysis from PURITY bytecode analyzer |
+
+**Examples:**
+
+```bash
+# Basic effect analysis
+mix effect lib/my_module.ex
+
+# Verbose output with detailed types
+mix effect lib/my_module.ex --verbose
+
+# JSON output for automated processing
+mix effect lib/my_module.ex --json
+
+# Include exception tracking
+mix effect lib/my_module.ex --exceptions
+
+# Full analysis with PURITY bytecode and exceptions
+mix effect lib/my_module.ex --purity --exceptions
+```
+
+**How It Works:**
+
+1. Discovers all application source files to understand cross-module effects
+2. Analyzes dependencies to build effect cache
+3. Infers effect types for all functions in the target file
+4. Displays results with effect types in compact notation (`:p`, `:s`, `:l`, `:d`, `:u`)
+5. Optionally includes PURITY bytecode analysis and exception information
+
+## Termination Analysis
+
+Litmus can verify that functions terminate (don't loop infinitely), separate from purity analysis.
+
+### Checking Termination
+
+Use the termination analysis API:
+
+```elixir
+# Analyze a module for termination
+{:ok, results} = Litmus.analyze_termination(:lists)
+
+# Check if a function terminates
+Litmus.terminates?(results, {:lists, :reverse, 1})  #=> true
+
+# Get termination status
+{:ok, status} = Litmus.get_termination(results, {:lists, :reverse, 1})
+#=> {:ok, :terminating}
+```
+
+### Stdlib Whitelist
+
+Check if stdlib functions terminate without analysis:
+
+```elixir
+# Pure stdlib functions that terminate
+Litmus.Stdlib.terminates?({Enum, :map, 2})      #=> true
+Litmus.Stdlib.terminates?({List, :reverse, 1})  #=> true
+
+# Non-terminating generators and servers
+Litmus.Stdlib.terminates?({Stream, :cycle, 1})        #=> false
+Litmus.Stdlib.terminates?({Process, :sleep, 1})       #=> false
+Litmus.Stdlib.terminates?({GenServer, :call, 2})      #=> false
+Litmus.Stdlib.terminates?({Task, :await, 2})         #=> false
+```
+
+### Compile-Time Enforcement
+
+Use the `pure` macro with `require_termination: true` to enforce termination at compile time:
+
+```elixir
+import Litmus.Pure
+
+# ✅ This compiles successfully
+result = pure require_termination: true do
+  [1, 2, 3]
+  |> Enum.map(&(&1 * 2))
+  |> Enum.sum()
+end
+
+# ❌ This fails at compile time - Stream.cycle never terminates
+pure require_termination: true do
+  Stream.cycle([1, 2, 3]) |> Enum.take(3)
+end
+
+# ❌ This fails - Process.sleep blocks indefinitely
+pure require_termination: true do
+  Process.sleep(1000)
+end
+```
+
+### Non-Terminating Functions
+
+These stdlib functions are known to not terminate:
+
+**Generators (infinite sequences):**
+- `Stream.cycle/1`, `Stream.iterate/2`, `Stream.unfold/2`, `Stream.repeatedly/1`
+- `Integer.digits/1` with 0 (edge case)
+
+**Blocking Operations:**
+- `Process.sleep/1`, `Process.wait_timeout/0`
+- `GenServer.call/2`, `GenServer.call/3` (waits for response)
+- `Task.await/1`, `Task.await/2` (waits for completion)
+- `Agent.get/2` (can wait on agent operations)
+
+**Loops:**
+- `Process.monitor/1` with selective receive
+- Any function with unbounded recursion
 
 ## Installation
 
@@ -189,200 +485,26 @@ end
 
 Run `mix deps.get` to install.
 
-## Usage
+## Advanced Topics
 
-### Basic Analysis
+### Standard Library Whitelist
 
-```elixir
-# Analyze a single module
-{:ok, results} = Litmus.analyze_module(:lists)
+**Whitelisted modules** (pure): `Enum`, `List`, `Map`, `MapSet`, `Tuple`, `String` (except atom conversions), `Integer`, `Float`, `Date`, `Time`, `Path`, `URI`, `Regex`, etc.
 
-# Check if a specific function is pure
-Litmus.pure?(results, {:lists, :reverse, 1})
-#=> true
+**NOT whitelisted** (impure): `IO`, `File`, `System`, `Process`, `Agent`, `Task`, or dangerous operations like `String.to_atom/1`.
 
-Litmus.pure?(results, {:lists, :keydelete, 3})
-#=> true
+See `Litmus.Stdlib` for complete details.
 
-# Get the detailed purity level
-{:ok, level} = Litmus.get_purity(results, {:lists, :map, 2})
-#=> {:ok, :pure}
-```
+### How Exception Tracking Works
 
-### Analyzing Multiple Modules
-
-```elixir
-# Sequential analysis
-{:ok, results} = Litmus.analyze_modules([:lists, :string, :maps])
-
-# Parallel analysis (faster for large codebases)
-{:ok, results} = Litmus.analyze_parallel([:lists, :string, :maps])
-```
-
-### Finding Missing Information
-
-```elixir
-# Identify functions that couldn't be analyzed
-%{functions: mfas, primops: prims} = Litmus.find_missing(results)
-```
-
-### Exception Tracking
-
-Analyze which exceptions functions may raise:
-
-```elixir
-# Analyze exceptions for a module
-{:ok, exceptions} = Litmus.analyze_exceptions(MyModule)
-
-# Check if a function can raise a specific exception
-Litmus.can_raise?(exceptions, {MyModule, :parse, 1}, ArgumentError)
-#=> true
-
-# Check if a function can throw/exit
-Litmus.can_throw_or_exit?(exceptions, {MyModule, :parse, 1})
-#=> false
-
-# Get detailed exception information
-{:ok, info} = Litmus.get_exceptions(exceptions, {MyModule, :parse, 1})
-#=> {:ok, %{
-#=>   errors: MapSet.new([ArgumentError, KeyError]),
-#=>   non_errors: false
-#=> }}
-```
-
-Exception tracking works by:
+Exception tracking propagates through call graphs by:
 1. Identifying calls to `raise`, `throw`, `exit`, and `:erlang.error/1,2`
-2. Propagating exceptions through call graphs via fixed-point iteration
-3. Analyzing try/catch blocks using Core Erlang AST to subtract caught exceptions
-4. Marking dynamic raises (e.g., `raise variable`) as `:dynamic` when types cannot be determined
+2. Propagating exceptions via fixed-point iteration
+3. Marking dynamic raises (e.g., `raise variable`) as `:dynamic`
 
-### Elixir Standard Library Whitelist
+**Note:** Try/catch blocks are not currently analyzed (conservative analysis - may over-report exceptions). This will be implemented in the bidirectional effect system.
 
-For maximum safety, Litmus includes a manually curated **whitelist** of Elixir standard library functions known to be pure. This provides instant purity checks without needing BEAM analysis.
-
-```elixir
-# Check if an Elixir stdlib function is whitelisted as pure
-Litmus.pure_stdlib?({Enum, :map, 2})
-#=> true
-
-Litmus.pure_stdlib?({String, :upcase, 1})
-#=> true
-
-# Side-effect functions are not whitelisted
-Litmus.pure_stdlib?({IO, :puts, 1})
-#=> false
-
-# Dangerous functions are excluded
-Litmus.pure_stdlib?({String, :to_atom, 1})
-#=> false (mutates atom table!)
-
-# Comprehensive check combining both PURITY analysis and whitelist
-Litmus.safe_to_optimize?(results, {Enum, :map, 2})
-#=> true
-```
-
-#### Whitelist Philosophy
-
-- **Whitelist, not blacklist**: Only explicitly listed functions are considered pure
-- **Conservative by default**: Unknown functions return `false` for maximum safety
-- **Three whitelist formats**:
-  - `:all` - Entire module is pure (e.g., `List`, `Integer`, `Float`)
-  - `{:all_except, exceptions}` - All functions except specified ones (e.g., `String` except `to_atom/1`)
-  - `%{function: [arities]}` - Selective whitelist (e.g., `Kernel` has only specific functions)
-
-#### Whitelisted Modules
-
-- **Core data structures**: `Enum`, `List`, `Map`, `MapSet`, `Tuple`, `Keyword`, `Range`, `Stream`
-- **Strings and numbers**: `String` (except atom conversions), `Integer`, `Float`
-- **Date/Time**: `Date`, `Time`, `DateTime` (except `now`/`utc_now`), `NaiveDateTime` (except `now`/`utc_now`)
-- **Utilities**: `Path`, `URI`, `Regex`, `Version`, `Exception`
-- **Kernel**: Selective whitelist of operators, type checks, and pure operations
-
-#### Explicitly NOT Whitelisted (Side Effects)
-
-- **I/O**: `IO`, `File`, `Port`
-- **System**: `System`, `Node`, `Code`
-- **Processes**: `Process`, `Agent`, `Task`, `GenServer`, `Registry`
-- **Dangerous operations**: `String.to_atom/1`, `String.to_existing_atom/1`, `apply/2`, `send/2`, etc.
-
-See `Litmus.Stdlib` module documentation for complete details and examples.
-
-### Compile-Time Purity Enforcement
-
-Litmus provides a `pure do ... end` macro that enforces purity constraints at **compile time**. Any impure function call within the block will cause a compilation error with detailed diagnostics.
-
-```elixir
-import Litmus.Pure
-
-# ✅ This compiles successfully
-result = pure do
-  [1, 2, 3, 4, 5]
-  |> Enum.map(&(&1 * 2))
-  |> Enum.filter(&(&1 > 5))
-  |> Enum.sum()
-end
-#=> 24
-
-# ❌ This fails at compile time
-pure do
-  IO.puts("Hello")  # Compilation error!
-end
-
-** (Litmus.Pure.ImpurityError) Impure function calls detected in pure block:
-
-  - IO.puts/1 (I/O operation)
-
-Pure blocks can only call whitelisted pure functions.
-See Litmus.Stdlib for the complete whitelist.
-```
-
-#### Exception Policies
-
-**New in v0.1.0**: Control which exceptions are allowed in pure blocks:
-
-```elixir
-import Litmus.Pure
-
-# Allow specific exceptions in otherwise pure code
-result = pure level: :pure, allow_exceptions: [ArgumentError, KeyError] do
-  # ✅ Computationally pure but may raise specific exceptions
-  Map.fetch!(data, :key) |> String.to_integer!()
-end
-
-# Allow any exceptions but forbid I/O
-result = pure level: :pure, allow_exceptions: :any do
-  # ✅ May raise anything, but no side effects
-  Integer.parse!(user_input)
-end
-
-# Forbid all exceptions
-result = pure level: :pure, allow_exceptions: :none do
-  # ❌ Would fail if this could raise
-  Enum.sum([1, 2, 3])  # ✅ This is safe
-end
-
-# ❌ This fails - KeyError not in allowed list
-pure allow_exceptions: [ArgumentError] do
-  Map.fetch!(%{}, :missing)  # Raises KeyError!
-end
-
-** (Litmus.Pure.ImpurityError) Disallowed exception calls detected in pure block:
-
-  - Map.fetch!/2 (raises: KeyError)
-
-Allowed exceptions: only [ArgumentError]
-```
-
-The system uses static analysis to determine which exceptions each function may raise and enforces policies at compile time.
-
-#### How It Works
-
-1. **Macro expansion**: The `pure` macro expands all macros in the code block (including `|>`)
-2. **AST analysis**: Extracts all function calls from the expanded AST
-3. **Whitelist checking**: Validates each call against `Litmus.Stdlib` whitelist
-4. **Compile-time errors**: Raises detailed errors with function classifications if impure calls are found
-
-#### Benefits
+### How the Pure Macro Works
 
 - **Zero runtime cost**: All checks happen at compile time
 - **Detailed error messages**: Shows exactly which functions are impure and why
@@ -462,7 +584,7 @@ PURITY and exception tracking use conservative analysis:
 
 - **False negatives** - Some pure functions may be marked impure
 - **Over-reporting exceptions** - Dynamic raises marked as `:dynamic` (may raise anything)
-- **Try/catch fallback** - If Core Erlang extraction fails, caught exceptions not subtracted
+- **Try/catch blocks not analyzed** - Caught exceptions are still reported (conservative)
 - **Higher-order functions** with dynamic closures cannot be fully analyzed
 - **Unknown functions** are assumed impure by default
 
@@ -531,15 +653,28 @@ Litmus consists of:
 
 1. **Core wrapper** (`lib/litmus.ex`) - Main API wrapping PURITY functions with exception tracking
 2. **Exception tracking** (`lib/litmus/exceptions.ex`) - Track exception propagation through call graphs
-3. **Try/catch analysis** (`lib/litmus/try_catch.ex`) - Core Erlang AST walking for exception subtraction
-4. **Pure macro** (`lib/litmus/pure.ex`) - Compile-time purity and exception enforcement
-5. **Stdlib whitelist** (`lib/litmus/stdlib.ex`) - Curated pure function whitelist
-6. **Effects system** (`lib/litmus/effects/`) - Algebraic effects with CPS transformation
+3. **Pure macro** (`lib/litmus/pure.ex`) - Compile-time purity and exception enforcement
+4. **Stdlib whitelist** (`lib/litmus/stdlib.ex`) - Curated pure function whitelist
+5. **Type system** (`lib/litmus/types/`) - Core types and effect operations
+   - **`core.ex`** - Type and effect definitions (`:p`, `:s`, `:l`, `:d`, `:u`, `:n`)
+   - **`effects.ex`** - Effect operations and row-polymorphic handling
+   - **`unification.ex`** - Type unification for type inference
+   - **`substitution.ex`** - Variable substitution and substitution composition
+6. **Inference engine** (`lib/litmus/inference/`) - Bidirectional type checking
+   - **`bidirectional.ex`** - Synthesis (⇒) and checking (⇐) modes
+   - **`context.ex`** - Type context and environment management
+7. **AST analyzer** (`lib/litmus/analyzer/`) - Infers effects from Elixir source code
+   - **`ast_walker.ex`** - Walks AST and infers effect types for all functions
+   - **`effect_tracker.ex`** - Tracks effects and function calls in expressions
+8. **Effects system** (`lib/litmus/effects/`) - Algebraic effects with CPS transformation
    - **`effects.ex`** - Main effect macro and handler API
    - **`transformer.ex`** - CPS transformation engine for AST
    - **`registry.ex`** - Effect categorization and tracking
    - **`unhandled_error.ex`** - Exception for unhandled effects
-7. **PURITY library** (`purity_source/`) - [Forked Erlang static analyzer](https://github.com/wende/purity) with type fixes and map support
+10. **Mix tasks** (`lib/mix/tasks/`) - CLI tooling
+    - **`effect.ex`** - `mix effect` command for analyzing source files
+    - **`generate_effects.ex`** - Generates effect cache for dependencies
+11. **PURITY library** (`purity_source/`) - [Forked Erlang static analyzer](https://github.com/wende/purity) with type fixes and map support
 
 ### How It Works
 
@@ -548,8 +683,7 @@ Litmus consists of:
 3. **Call Graph Construction** - Builds dependency graph of function calls
 4. **Purity Propagation** - Fixed-point iteration propagates impurity through callers
 5. **Exception Tracking** - Identifies exception-raising operations and propagates through call graph
-6. **Try/Catch Analysis** - Extracts Core Erlang AST to detect try/catch and subtract caught exceptions
-7. **Result Conversion** - Erlang `dict()` results converted to Elixir maps with exception information
+6. **Result Conversion** - Erlang `dict()` results converted to Elixir maps with exception information
 
 ## Comparison with Whitepaper
 
@@ -559,14 +693,15 @@ This implementation demonstrates concepts from the [Litmus whitepaper](./whitepa
 |-------------------|----------------|
 | Conservative static analysis | ✅ PURITY's bytecode analyzer extended with exception tracking |
 | Exception tracking | ✅ **NEW** - Tracks exception propagation through call graphs |
-| Try/catch analysis | ✅ **NEW** - Core Erlang AST analysis subtracts caught exceptions |
+| Try/catch analysis | 🔄 **TODO** - Will be implemented in bidirectional effect system |
 | Fine-grained exception policies | ✅ **NEW** - `allow_exceptions` option in pure macro |
 | :dynamic vs :unknown distinction | ✅ **NEW** - Semantic hierarchy for analysis failures |
 | Elixir stdlib classifications | ✅ `Litmus.Stdlib` whitelist module |
 | Compile-time enforcement | ✅ `pure` macro with purity and exception checking |
+| Bidirectional type inference | ✅ **NEW** - Infers effect types from source with lambda propagation |
+| Mix tasks | ✅ **NEW** - `mix effect` command for source analysis |
 | Optional annotations | ⏳ Planned (`@pure` attributes) |
 | PLT caching | ⏳ Planned (Litmus.PLT module) |
-| Mix tasks | ⏳ Planned (`mix litmus.analyze`) |
 | IDE integration | ⏳ Future work |
 
 ## Roadmap
@@ -576,7 +711,6 @@ This implementation demonstrates concepts from the [Litmus whitepaper](./whitepa
 - [x] **Litmus.Stdlib** - Whitelist-based purity classifications for Elixir standard library
 - [x] **Litmus.Pure** - `pure do...end` macro for compile-time purity enforcement
 - [x] **Litmus.Exceptions** - Exception tracking module with propagation through call graphs
-- [x] **Litmus.TryCatch** - Core Erlang AST analysis for try/catch exception subtraction
 - [x] **Exception policies** - Fine-grained `allow_exceptions` control in pure macro
 - [x] **:dynamic vs :unknown** - Semantic distinction for analysis failures
 
@@ -587,14 +721,16 @@ This implementation demonstrates concepts from the [Litmus whitepaper](./whitepa
 - [x] **Control flow transformation** - `if/else` expressions with effects
 - [x] **Anonymous function support** - Transform closures with effects in their bodies
 - [x] **Effect tracking options** - Selective effect tracking by category (`:file`, `:io`, `:network`, etc.)
+- [x] **Bidirectional type inference** - Infers effect types from source code with lambda effect propagation
+- [x] **Higher-order function support** - Correctly analyzes effects in `Enum.map`, `Enum.filter`, callbacks, etc.
+- [x] **Mix task** - `mix effect` command for analyzing Elixir files with cross-module effect tracking
+- [x] **Termination analysis** - Detects non-terminating functions and enforces termination at compile time
 
 ### Planned ⏳
 
-- [ ] **Advanced effect features** - `case`, `cond`, `with` expressions
-- [ ] **Higher-order function support** - Effects in `Enum.map`, callbacks, etc.
-- [ ] **Nested closure tracking** - Functions returning functions with effects
+- [ ] **Advanced effect features** - `case`, `cond`, `with` expressions in effect macro
+- [ ] **Nested closure tracking** - Functions returning functions with effects in effect macro
 - [ ] **Litmus.PLT** - Persistent Lookup Table for caching results across compilations
-- [ ] **Mix tasks** - `mix litmus.analyze`, `mix litmus.build_plt`
 - [ ] **Litmus.Results** - Pretty-printing and HTML/JSON report generation
 - [ ] **ExUnit integration** - Purity and exception assertions in tests
 - [ ] **@pure annotations** - Optional developer annotations for verification
@@ -607,14 +743,14 @@ Contributions welcome! Areas for improvement:
 
 1. **Update PURITY** to support Erlang maps and modern syntax
 2. **Expand stdlib whitelist** - Add more Elixir modules, refine existing classifications with exception information
-3. **Improve exception tracking** - Handle more edge cases in try/catch analysis
+3. **Try/catch analysis** - Implement exception handling in bidirectional effect system
 4. **PLT implementation** - Build persistent caching for purity and exception results
 5. **Mix tasks** - CLI tools for analysis and reporting
 6. **ExUnit integration** - Test helpers for asserting purity and exception properties
 7. **Documentation** - More usage examples and guides
 8. **Performance** - Optimize analysis for large codebases
 
-Run the test suite with `mix test` (**287 tests** covering purity analysis, exception tracking, and algebraic effects - 100% passing).
+Run the test suite with `mix test` (**374 tests** covering purity analysis, exception tracking, bidirectional type inference, lambda effect propagation, and algebraic effects - 100% passing).
 
 ## License
 

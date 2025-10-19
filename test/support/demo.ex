@@ -1,10 +1,8 @@
-defmodule Demo do
+defmodule Support.Demo do
   @moduledoc "Demo module showing pure and effectful functions"
 
   # Pure mathematical functions
   def add(x, y), do: x + y
-  def multiply(x, y), do: x * y
-  def square(x), do: x * x
 
   # List processing (pure)
   def sum_list(list) do
@@ -20,14 +18,10 @@ defmodule Demo do
   def greet(name) do
     IO.puts("Hello, #{name}!")
   end
-
-  # File effects
-  def read_file(path) do
-    File.read!(path)
-  end
-
-  def write_file(path, content) do
-    File.write!(path, content)
+  
+  # Unknown
+  def unknown() do
+    apply(IO, :puts)  
   end
 
   # Process effects
@@ -39,6 +33,10 @@ defmodule Demo do
   def head_of_list(list) do
     hd(list)
   end
+  
+  def exception() do
+    raise ArgumentError
+  end
 
   # Mixed effects
   def log_and_save(message, path) do
@@ -49,24 +47,24 @@ defmodule Demo do
 
   # Pure function from other module
   def other_module_pure() do
-    SampleModule.pure_add(1, 2)
+    Support.SampleModule.pure_add(1, 2)
   end
 
   # Effectful function from other module
   def other_module_effectful() do
-    SampleModule.print_greeting("John")
+    Support.SampleModule.print_greeting("John")
   end
 
   # Exception from other module
   def other_module_exception() do
-    SampleModule.get_first([1, 2, 3])
+    Support.SampleModule.get_first([1, 2, 3])
   end
 
   def other_module_higher_order_pure() do
-    SampleModule.higher_order_function(fn x -> x * 2 end)
+    Support.SampleModule.higher_order_function(fn x -> x * 2 end)
   end
 
   def other_module_higher_order_effectful() do
-    SampleModule.higher_order_function(fn x -> IO.puts("Hello, #{x}!") end)
+    Support.SampleModule.higher_order_function(fn x -> IO.puts("Hello, #{x}!") end)
   end
 end

@@ -13,7 +13,8 @@ defmodule Litmus.Registry.Builder do
   Generates a complete effects registry for all modules in scope.
 
   Returns a map of `{module, function, arity} => effect_type` where effect_type
-  is one of `:p`, `:n`, `:s`, `:exn`, or `:u`.
+  is one of `:p` (pure), `:e` (exceptions), `:d` (dependent), `:l` (lambda-dependent),
+  `:n` (nif), `:s` (side effects), or `:u` (unknown).
 
   ## Options
 
@@ -398,6 +399,8 @@ defmodule Litmus.Registry.Builder do
   end
 
   defp effect_to_json(:p), do: "p"
+  defp effect_to_json(:d), do: "d"
+  defp effect_to_json(:l), do: "l"
   defp effect_to_json(:n), do: "n"
   defp effect_to_json(:s), do: "s"
   defp effect_to_json(:u), do: "u"

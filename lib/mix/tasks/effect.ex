@@ -31,17 +31,28 @@ defmodule Mix.Tasks.Effect do
   use Mix.Task
 
   alias Litmus.Analyzer.ASTWalker
+  alias Litmus.Formatter
   alias Litmus.Types.{Core, Effects}
+
+  # Stateful Kernel functions that should be displayed (rest are hidden as noise)
+  @stateful_kernel_functions [
+    :send, :spawn, :spawn_link, :spawn_monitor, :apply, :exit, :self, :make_ref,
+    :raise, :reraise, :throw
+  ]
+
+  @deps_cache_path ".effects/deps.cache"
+  @deps_checksum_path ".effects/deps.checksum"
 
   @shortdoc "Analyzes effects and exceptions in an Elixir file"
 
   @impl Mix.Task
   def run(args) do
     # Parse options
-    {opts, paths, _} = OptionParser.parse(args,
-      switches: [verbose: :boolean, json: :boolean, exceptions: :boolean, purity: :boolean],
-      aliases: [v: :verbose]
-    )
+    {opts, paths, _} =
+      OptionParser.parse(args,
+        switches: [verbose: :boolean, json: :boolean, exceptions: :boolean, purity: :boolean],
+        aliases: [v: :verbose]
+      )
 
     case paths do
       [] ->
@@ -61,22 +72,43 @@ defmodule Mix.Tasks.Effect do
       exit({:shutdown, 1})
     end
 
+    # Step 1: Load or analyze dependencies
+    deps_cache = load_or_analyze_deps()
+
+    # Step 2: Discover all application source files
+    app_files = discover_app_files()
+
+    Mix.shell().info(
+      "Analyzing #{length(app_files)} application files for cross-module effects...\n"
+    )
+
+    # Step 3: Analyze all files to build effect cache
+    effect_cache = build_effect_cache(app_files)
+    Mix.shell().info("Built effect cache with #{map_size(effect_cache)} functions\n")
+
+    # Step 4: Merge dependency and application caches
+    full_cache = Map.merge(deps_cache, effect_cache)
+
+    # Step 5: Set runtime cache for cross-module lookups
+    Litmus.Effects.Registry.set_runtime_cache(full_cache)
+
+    # Step 6: Analyze the requested file with full context
     Mix.shell().info("Analyzing: #{path}\n")
 
-    # Parse source file to AST then analyze
-    result = case File.read(path) do
-      {:ok, source} ->
-        case Code.string_to_quoted(source, file: path, line: 1) do
-          {:ok, ast} ->
-            ASTWalker.analyze_ast(ast)
+    result =
+      case File.read(path) do
+        {:ok, source} ->
+          case Code.string_to_quoted(source, file: path, line: 1) do
+            {:ok, ast} ->
+              ASTWalker.analyze_ast(ast)
 
-          {:error, {line, error, _}} ->
-            {:error, {:parse_error, line, error}}
-        end
+            {:error, {line, error, _}} ->
+              {:error, {:parse_error, line, error}}
+          end
 
-      {:error, reason} ->
-        {:error, {:file_error, reason}}
-    end
+        {:error, reason} ->
+          {:error, {:file_error, reason}}
+      end
 
     case result do
       {:ok, analysis} ->
@@ -86,14 +118,163 @@ defmodule Mix.Tasks.Effect do
           output_text(analysis, opts)
         end
 
+        # Clear runtime cache after displaying results
+        Litmus.Effects.Registry.clear_runtime_cache()
+
       {:error, {:parse_error, line, error}} ->
         Mix.shell().error("Parse error at line #{line}: #{error}")
+        Litmus.Effects.Registry.clear_runtime_cache()
         exit({:shutdown, 1})
 
       {:error, reason} ->
         Mix.shell().error("Analysis failed: #{inspect(reason)}")
+        Litmus.Effects.Registry.clear_runtime_cache()
         exit({:shutdown, 1})
     end
+  end
+
+  defp discover_app_files do
+    get_elixirc_paths()
+    |> Enum.flat_map(&find_ex_files/1)
+    |> Enum.uniq()
+  end
+
+  defp get_elixirc_paths do
+    case Mix.Project.get() do
+      nil -> ["lib"]
+      _ -> Mix.Project.config()[:elixirc_paths] || ["lib"]
+    end
+  end
+
+  defp find_ex_files(path) do
+    if File.exists?(path) do
+      Path.wildcard("#{path}/**/*.ex")
+    else
+      []
+    end
+  end
+
+  @deps_cache_path ".effects/deps.cache"
+  @deps_checksum_path ".effects/deps.checksum"
+
+  defp load_or_analyze_deps do
+    # Calculate current dependency checksum
+    current_checksum = calculate_deps_checksum()
+
+    # Check if we have a cached checksum
+    cached_checksum =
+      if File.exists?(@deps_checksum_path) do
+        File.read!(@deps_checksum_path) |> String.trim()
+      else
+        nil
+      end
+
+    # If checksum matches and cache exists, load from cache
+    if current_checksum == cached_checksum and File.exists?(@deps_cache_path) do
+      Mix.shell().info("Loading dependency effects from cache...")
+
+      case File.read(@deps_cache_path) do
+        {:ok, content} ->
+          Jason.decode!(content)
+
+        _ ->
+          # Cache corrupted, re-analyze
+          analyze_and_cache_deps(current_checksum)
+      end
+    else
+      # Checksum changed or no cache, re-analyze
+      if cached_checksum do
+        Mix.shell().info("Dependency checksum changed, re-analyzing dependencies...")
+      else
+        Mix.shell().info("Analyzing dependencies for the first time...")
+      end
+
+      analyze_and_cache_deps(current_checksum)
+    end
+  end
+
+  defp calculate_deps_checksum do
+    # Get all dependency applications
+    deps =
+      case Mix.Project.get() do
+        nil ->
+          []
+
+        _ ->
+          # Get all loaded applications except the current one
+          app_name = Mix.Project.config()[:app]
+
+          Application.loaded_applications()
+          |> Enum.map(&elem(&1, 0))
+          |> Enum.reject(
+            &(&1 == app_name or &1 in [:kernel, :stdlib, :elixir, :compiler, :logger])
+          )
+      end
+
+    # Create a checksum from dependency names and versions
+    checksum_data =
+      deps
+      |> Enum.sort()
+      |> Enum.map(fn app ->
+        version = Application.spec(app, :vsn) || '0.0.0'
+        "#{app}:#{version}"
+      end)
+      |> Enum.join(",")
+
+    # Use Erlang's built-in hash function (no external deps needed)
+    :erlang.phash2(checksum_data) |> Integer.to_string(16)
+  end
+
+  defp analyze_and_cache_deps(checksum) do
+    # For now, return empty cache - full dependency analysis can be added later
+    # This would involve discovering all dependency modules and analyzing them
+    cache = %{}
+
+    # Ensure .effects directory exists
+    File.mkdir_p!(".effects")
+
+    # Save cache and checksum
+    File.write!(@deps_cache_path, Jason.encode!(cache, pretty: true))
+    File.write!(@deps_checksum_path, checksum)
+
+    cache
+  end
+
+  defp build_effect_cache(files) do
+    Litmus.Effects.Registry.set_permissive_mode(true)
+
+    cache =
+      files
+      |> Enum.reduce(%{}, &merge_file_effects(&2, &1))
+
+    Litmus.Effects.Registry.set_permissive_mode(false)
+
+    cache
+  end
+
+  defp merge_file_effects(acc, file) do
+    case analyze_file_safely(file) do
+      {:ok, analysis} -> Map.merge(acc, extract_file_effects(analysis))
+      :error -> acc
+    end
+  end
+
+  defp analyze_file_safely(file) do
+    with {:ok, source} <- File.read(file),
+         {:ok, ast} <- Code.string_to_quoted(source, file: file, line: 1),
+         {:ok, analysis} <- ASTWalker.analyze_ast(ast) do
+      {:ok, analysis}
+    else
+      _ -> :error
+    end
+  end
+
+  defp extract_file_effects(analysis) do
+    analysis.functions
+    |> Enum.map(fn {{m, f, a}, func_analysis} ->
+      {{m, f, a}, Core.to_compact_effect(func_analysis.effect)}
+    end)
+    |> Map.new()
   end
 
   defp output_text(result, opts) do
@@ -121,28 +302,32 @@ defmodule Mix.Tasks.Effect do
     unless Enum.empty?(errors) do
       Mix.shell().info("\n#{IO.ANSI.yellow()}⚠ Warnings/Errors:#{IO.ANSI.reset()}")
       Mix.shell().info("═══════════════════════════════════════════════════════════\n")
-
       Enum.each(errors, fn error ->
         {_mod, func, line} = error.location
-        Mix.shell().info("  #{IO.ANSI.red()}•#{IO.ANSI.reset()} #{func} (line #{line})")
-        Mix.shell().info("    #{error.message}\n")
+        Mix.shell().info("  #{IO.ANSI.red()}•#{IO.ANSI.reset()} #{func} (line #{line})\n    #{error.message}\n")
       end)
     end
 
     # Summary
     Mix.shell().info("\n═══════════════════════════════════════════════════════════")
 
-    {pure_count, lambda_count, effectful_count} = count_by_purity(functions)
-    total = pure_count + lambda_count + effectful_count
+    counts = count_by_purity(functions)
+    pure_count = counts[:p]
+    dependent_count = counts[:d]
+    lambda_count = counts[:l]
+    unknown_count = counts[:u]
+    exception_count = counts[:e]
+    effectful_count = counts[:s]
+    total = pure_count + dependent_count + lambda_count + unknown_count + exception_count + effectful_count
 
     Mix.shell().info("Summary: #{total} functions analyzed")
     Mix.shell().info("  #{IO.ANSI.green()}✓#{IO.ANSI.reset()} Pure: #{pure_count}")
-    Mix.shell().info("  #{IO.ANSI.cyan()}λ#{IO.ANSI.reset()} Lambda-dependent: #{lambda_count}")
+    if dependent_count > 0, do: Mix.shell().info("  #{IO.ANSI.blue()}◐#{IO.ANSI.reset()} Context-dependent: #{dependent_count}")
+    if lambda_count > 0, do: Mix.shell().info("  #{IO.ANSI.cyan()}λ#{IO.ANSI.reset()} Lambda-dependent: #{lambda_count}")
+    if unknown_count > 0, do: Mix.shell().info("  #{IO.ANSI.magenta()}?#{IO.ANSI.reset()} Unknown: #{unknown_count}")
+    if exception_count > 0, do: Mix.shell().info("  #{IO.ANSI.red()}⚠#{IO.ANSI.reset()} Exception: #{exception_count}")
     Mix.shell().info("  #{IO.ANSI.yellow()}⚡#{IO.ANSI.reset()} Effectful: #{effectful_count}")
-
-    unless Enum.empty?(errors) do
-      Mix.shell().info("  #{IO.ANSI.red()}⚠#{IO.ANSI.reset()} Errors: #{length(errors)}")
-    end
+    if not Enum.empty?(errors), do: Mix.shell().info("  #{IO.ANSI.red()}⚠#{IO.ANSI.reset()} Errors: #{length(errors)}")
 
     Mix.shell().info("═══════════════════════════════════════════════════════════\n")
   end
@@ -150,71 +335,22 @@ defmodule Mix.Tasks.Effect do
   defp display_function(name, arity, analysis, opts) do
     visibility = if analysis[:visibility] == :defp, do: " (private)", else: ""
 
-    # Function header
     Mix.shell().info("#{IO.ANSI.cyan()}#{name}/#{arity}#{IO.ANSI.reset()}#{visibility}")
     Mix.shell().info("  #{String.duplicate("─", 55)}")
 
-    # Effect information - use compact format
     effect = analysis.effect
     compact_effect = Core.to_compact_effect(effect)
 
-    is_pure = Effects.is_pure?(effect)
-    is_lambda_dependent = compact_effect == :u
+    Mix.shell().info("  #{get_purity_indicator(effect)}")
+    Mix.shell().info("  Effect: #{Formatter.format_compact_effect(compact_effect)}")
 
-    purity_indicator = cond do
-      is_pure ->
-        "#{IO.ANSI.green()}✓ Pure#{IO.ANSI.reset()}"
-      is_lambda_dependent ->
-        "#{IO.ANSI.cyan()}λ Lambda-dependent#{IO.ANSI.reset()}"
-      true ->
-        "#{IO.ANSI.yellow()}⚡ Effectful#{IO.ANSI.reset()}"
-    end
-
-    Mix.shell().info("  #{purity_indicator}")
-    Mix.shell().info("  Effect: #{Core.format_compact_effect(compact_effect)}")
-
-    # Type information in verbose mode
     if opts[:verbose] do
-      type_str = Core.format_type(analysis.type)
-      Mix.shell().info("  Type: #{type_str}")
-      Mix.shell().info("  Return: #{Core.format_type(analysis.return_type)}")
+      Mix.shell().info("  Type: #{Formatter.format_type(analysis.type)}")
+      Mix.shell().info("  Return: #{Formatter.format_type(analysis.return_type)}")
     end
 
-    # Function calls (filtered)
-    filtered_calls = filter_noise_calls(analysis.calls)
+    display_function_calls(analysis.calls, opts[:verbose])
 
-    unless Enum.empty?(filtered_calls) do
-      Mix.shell().info("  Calls:")
-      filtered_calls
-      |> Enum.take(5)  # Limit to first 5 calls
-      |> Enum.each(fn {m, f, a} ->
-        # Try to get effect from registry, default to unknown for local functions
-        call_effect = try do
-          Effects.from_mfa({m, f, a})
-        rescue
-          _ -> {:effect_unknown}  # Local functions default to unknown
-        end
-
-        call_compact = Core.to_compact_effect(call_effect)
-        call_indicator = cond do
-          Effects.is_pure?(call_effect) ->
-            IO.ANSI.green() <> "→" <> IO.ANSI.reset()
-          call_compact == :u ->
-            IO.ANSI.cyan() <> "λ" <> IO.ANSI.reset()
-          true ->
-            IO.ANSI.yellow() <> "⚡" <> IO.ANSI.reset()
-        end
-        # Strip "Elixir." prefix from module name
-        module_name = m |> Atom.to_string() |> String.replace_prefix("Elixir.", "")
-        Mix.shell().info("    #{call_indicator} #{module_name}.#{f}/#{a}")
-      end)
-
-      if length(filtered_calls) > 5 do
-        Mix.shell().info("    ... and #{length(filtered_calls) - 5} more")
-      end
-    end
-
-    # Exception analysis if requested
     if opts[:exceptions] do
       display_exception_info(name, arity, opts)
     end
@@ -222,78 +358,89 @@ defmodule Mix.Tasks.Effect do
     Mix.shell().info("")
   end
 
+  defp display_function_calls(calls, _verbose) do
+    filtered = filter_noise_calls(calls)
+
+    unless Enum.empty?(filtered) do
+      Mix.shell().info("  Calls:")
+
+      filtered
+      |> Enum.take(5)
+      |> Enum.each(fn {m, f, a} ->
+        effect = get_call_effect({m, f, a})
+        indicator = get_call_indicator(effect)
+        module_name = format_module_name(m)
+        Mix.shell().info("    #{indicator} #{module_name}.#{f}/#{a}")
+      end)
+
+      if length(filtered) > 5 do
+        Mix.shell().info("    ... and #{length(filtered) - 5} more")
+      end
+    end
+  end
+
+  defp get_purity_indicator(effect) do
+    compact = Core.to_compact_effect(effect)
+
+    cond do
+      Effects.is_pure?(effect) -> "#{IO.ANSI.green()}✓ Pure#{IO.ANSI.reset()}"
+      compact == :l -> "#{IO.ANSI.cyan()}λ Lambda-dependent#{IO.ANSI.reset()}"
+      compact == :d -> "#{IO.ANSI.blue()}◐ Context-dependent#{IO.ANSI.reset()}"
+      compact == :u -> "#{IO.ANSI.magenta()}? Unknown#{IO.ANSI.reset()}"
+      match?({:e, _}, compact) -> "#{IO.ANSI.red()}⚠ Exception#{IO.ANSI.reset()}"
+      true -> "#{IO.ANSI.yellow()}⚡ Effectful#{IO.ANSI.reset()}"
+    end
+  end
+
+  defp get_call_effect({m, f, a}) do
+    try do
+      Effects.from_mfa({m, f, a})
+    rescue
+      _ -> {:effect_unknown}
+    end
+  end
+
+  defp get_call_indicator(effect) do
+    compact = Core.to_compact_effect(effect)
+
+    cond do
+      Effects.is_pure?(effect) -> IO.ANSI.green() <> "→" <> IO.ANSI.reset()
+      compact == :l -> IO.ANSI.cyan() <> "λ" <> IO.ANSI.reset()
+      match?({:e, _}, compact) -> IO.ANSI.red() <> "⚠" <> IO.ANSI.reset()
+      compact == :u -> IO.ANSI.magenta() <> "?" <> IO.ANSI.reset()
+      true -> IO.ANSI.yellow() <> "⚡" <> IO.ANSI.reset()
+    end
+  end
+
+  defp format_module_name(module) do
+    module |> Atom.to_string() |> String.replace_prefix("Elixir.", "")
+  end
+
   defp display_exception_info(_name, _arity, _opts) do
     # Try to get exception information from the existing analysis
     # This would integrate with Litmus.analyze_exceptions if available
-    Mix.shell().info("  #{IO.ANSI.faint()}(Exception analysis: run with compiled module)#{IO.ANSI.reset()}")
+    Mix.shell().info(
+      "  #{IO.ANSI.faint()}(Exception analysis: run with compiled module)#{IO.ANSI.reset()}"
+    )
   end
 
   defp filter_noise_calls(calls) do
-    # Stateful Kernel functions that should be shown
-    stateful_kernel_functions = [
-      :send, :spawn, :spawn_link, :spawn_monitor, :apply, :exit,
-      :self, :make_ref, :raise, :reraise, :throw
-    ]
-
-    # Filter out noise
     Enum.reject(calls, fn {module, function, _arity} ->
-      # Keep all non-Kernel calls
-      if module != Kernel do
-        false
-      else
-        # For Kernel, only hide pure structural calls
-        function not in stateful_kernel_functions and
-        is_kernel_noise_function?(function)
-      end
+      module == Kernel and function not in @stateful_kernel_functions
     end)
   end
 
-  # Check if a Kernel function is noise (structural/pure operations)
-  defp is_kernel_noise_function?(function) do
-    noise_patterns = [
-      # Operators
-      :+, :-, :*, :/, :==, :!=, :<, :>, :<=, :>=, :===, :!==,
-      :and, :or, :not, :&&, :||, :!,
-      :++, :--, :<>, :in,
-
-      # Assignment and structural
-      :=, :., :.., :"::", :"|>", :".", :__aliases__, :__block__,
-
-      # Binary operations
-      :<<>>,
-
-      # Type checks and conversions
-      :is_atom, :is_binary, :is_bitstring, :is_boolean, :is_float,
-      :is_function, :is_integer, :is_list, :is_map, :is_number,
-      :is_nil, :is_pid, :is_port, :is_reference, :is_tuple,
-      :to_string, :to_charlist,
-
-      # Pure accessors and inspectors
-      :hd, :tl, :length, :elem, :get_in, :put_in, :update_in,
-      :byte_size, :bit_size, :tuple_size, :map_size,
-
-      # Lambda/function
-      :fn, :&, :->,
-
-      # Pure Kernel functions
-      :abs, :div, :rem, :max, :min, :round, :trunc, :ceil, :floor,
-      :inspect, :match?
-    ]
-
-    function in noise_patterns
-  end
-
   defp count_by_purity(functions) do
-    Enum.reduce(functions, {0, 0, 0}, fn {_mfa, analysis}, {pure, lambda, effectful} ->
-      compact_effect = Core.to_compact_effect(analysis.effect)
-      cond do
-        Effects.is_pure?(analysis.effect) ->
-          {pure + 1, lambda, effectful}
-        compact_effect == :u ->
-          {pure, lambda + 1, effectful}
-        true ->
-          {pure, lambda, effectful + 1}
-      end
+    initial = %{p: 0, d: 0, l: 0, u: 0, e: 0, s: 0, n: 0}
+
+    Enum.reduce(functions, initial, fn {_mfa, analysis}, acc ->
+      key =
+        case Core.to_compact_effect(analysis.effect) do
+          {:e, _} -> :e
+          other -> other
+        end
+
+      Map.update!(acc, key, &(&1 + 1))
     end)
   end
 
@@ -301,32 +448,36 @@ defmodule Mix.Tasks.Effect do
     # Convert to JSON-friendly format
     json_result = %{
       module: inspect(result.module),
-      functions: Enum.map(result.functions, fn {{m, f, a}, analysis} ->
-        %{
-          module: inspect(m),
-          name: f,
-          arity: a,
-          effect: Core.format_effect(analysis.effect),
-          compact_effect: Core.to_compact_effect(analysis.effect),
-          effect_labels: Effects.to_list(analysis.effect),
-          is_pure: Effects.is_pure?(analysis.effect),
-          type: Core.format_type(analysis.type),
-          return_type: Core.format_type(analysis.return_type),
-          visibility: analysis[:visibility] || :def,
-          calls: Enum.map(analysis.calls, fn {cm, cf, ca} ->
-            %{module: inspect(cm), function: cf, arity: ca}
-          end),
-          line: analysis.line
-        }
-      end),
-      errors: Enum.map(result.errors, fn error ->
-        {mod, func, line} = error.location
-        %{
-          type: error.type,
-          message: error.message,
-          location: %{module: inspect(mod), function: func, line: line}
-        }
-      end)
+      functions:
+        Enum.map(result.functions, fn {{m, f, a}, analysis} ->
+          %{
+            module: inspect(m),
+            name: f,
+            arity: a,
+            effect: Formatter.format_effect(analysis.effect),
+            compact_effect: Core.to_compact_effect(analysis.effect),
+            effect_labels: Effects.to_list(analysis.effect),
+            is_pure: Effects.is_pure?(analysis.effect),
+            type: Formatter.format_type(analysis.type),
+            return_type: Formatter.format_type(analysis.return_type),
+            visibility: analysis[:visibility] || :def,
+            calls:
+              Enum.map(analysis.calls, fn {cm, cf, ca} ->
+                %{module: inspect(cm), function: cf, arity: ca}
+              end),
+            line: analysis.line
+          }
+        end),
+      errors:
+        Enum.map(result.errors, fn error ->
+          {mod, func, line} = error.location
+
+          %{
+            type: error.type,
+            message: error.message,
+            location: %{module: inspect(mod), function: func, line: line}
+          }
+        end)
     }
 
     Mix.shell().info(Jason.encode!(json_result, pretty: true))

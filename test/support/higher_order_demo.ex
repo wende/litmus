@@ -1,4 +1,4 @@
-defmodule HigherOrderDemo do
+defmodule Support.HigherOrderDemo do
   @moduledoc """
   Demonstrates effect analysis for higher-order functions.
   """

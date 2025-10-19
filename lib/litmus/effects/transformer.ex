@@ -358,18 +358,27 @@ defmodule Litmus.Effects.Transformer do
   # Handle unqualified calls like hd([]) which are implicitly Kernel functions
   defp extract_call({function, _call_meta, args}, opts)
        when is_atom(function) and is_list(args) do
-    arity = length(args)
-
-    # Check if this is a Kernel function effect
-    if should_track_effect?({Kernel, function, arity}, opts) do
-      effect_sig =
-        quote do
-          {Kernel, unquote(function), [unquote_splicing(args)]}
-        end
-
-      {:effect, effect_sig}
-    else
+    # Special case: literal constructors and AST structures are not function calls
+    # :{} - tuple constructor: {a, b, c}
+    # :%{} - map constructor: %{a: 1}
+    # :% - struct constructor: %Foo{}
+    # :__block__ - block of expressions
+    if function in [:{}, :%{}, :%, :__block__] do
       :pure
+    else
+      arity = length(args)
+
+      # Check if this is a Kernel function effect
+      if should_track_effect?({Kernel, function, arity}, opts) do
+        effect_sig =
+          quote do
+            {Kernel, unquote(function), [unquote_splicing(args)]}
+          end
+
+        {:effect, effect_sig}
+      else
+        :pure
+      end
     end
   end
 

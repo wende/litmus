@@ -13,8 +13,10 @@ defmodule Litmus do
   - `:pure` (p) - Referentially transparent, no side effects, no exceptions
   - `:exceptions` (e) - Side-effect free but may raise exceptions
   - `:dependent` (d) - Side-effect free but depends on execution environment (time, process dict, etc.)
+  - `:lambda_dependent` (l) - Effect depends on higher-order function arguments passed at call time
   - `:nif` (n) - Calls a Native Implemented Function (behavior unknown, conservatively treated as impure)
   - `:side_effects` (s) - Has observable side effects (I/O, process operations, state mutation, etc.)
+  - `:unknown` (u) - Cannot be statically determined (dynamic dispatch, unanalyzed code, etc.)
 
   **NIFs are a distinct purity level** between `:dependent` and `:side_effects`. While
   we cannot statically analyze native C/C++ code, we know that NIFs may be impure but
@@ -44,7 +46,9 @@ defmodule Litmus do
   - Results represent compile-time static analysis, not runtime behavior
   """
 
-  @type purity_level :: :pure | :exceptions | :dependent | :nif | :side_effects | :unknown
+  # All 7 purity levels: :pure (p), :exceptions (e), :dependent (d), :lambda_dependent (l),
+  # :nif (n), :side_effects (s), :unknown (u)
+  @type purity_level :: :pure | :exceptions | :dependent | :lambda_dependent | :nif | :side_effects | :unknown
   @type purity_result :: %{
           mfa() => purity_level(),
           dependencies: list()
@@ -707,15 +711,17 @@ defmodule Litmus do
   end
 
   # Convert Erlang purity result to Elixir atom
+  # Handles all purity levels: :pure, :exceptions, :dependent, :nif, :side_effects, :unknown
+  # Note: :lambda_dependent is determined by effect inference, not by PURITY analysis
   defp elixirify_purity({purity, _deps}) do
     case purity do
-      :p -> :pure
-      :e -> :exceptions
-      :d -> :dependent
-      :n -> :nif
-      :s -> :side_effects
-      {:at_least, _} -> :unknown
-      _ -> :unknown
+      :p -> :pure                     # Pure (p)
+      :e -> :exceptions               # Exceptions (e)
+      :d -> :dependent                # Dependent (d)
+      :n -> :nif                      # NIF (n)
+      :s -> :side_effects             # Side effects (s)
+      {:at_least, _} -> :unknown      # Unknown (conservative estimate)
+      _ -> :unknown                   # Default: unknown (u)
     end
   end
 
@@ -728,16 +734,18 @@ defmodule Litmus do
   end
 
   # Convert Elixir purity level back to Erlang tuple format
+  # Handles all 7 purity types: :pure, :exceptions, :dependent, :lambda_dependent, :nif, :side_effects, :unknown
   defp erlify_purity(purity) do
     erl_atom =
       case purity do
-        :pure -> :p
-        :exceptions -> :e
-        :dependent -> :d
-        :nif -> :n
-        :side_effects -> :s
-        :unknown -> {:at_least, :s}
-        _ -> {:at_least, :s}
+        :pure -> :p                         # Pure (p)
+        :exceptions -> :e                   # Exceptions (e)
+        :dependent -> :d                    # Dependent (d)
+        :lambda_dependent -> :d             # Lambda-dependent (l) - treat as dependent for PURITY
+        :nif -> :n                          # NIF (n)
+        :side_effects -> :s                 # Side effects (s)
+        :unknown -> {:at_least, :s}         # Unknown (u) - conservative: assume side effects
+        _ -> {:at_least, :s}                # Default: unknown
       end
 
     {erl_atom, []}
@@ -833,33 +841,10 @@ defmodule Litmus do
     # Propagate exceptions through call graph
     propagated = propagate_exceptions(exception_map, table)
 
-    # Analyze try/catch blocks to find caught exceptions
-    case Litmus.TryCatch.analyze_beam(beam_path) do
-      {:ok, caught_map} ->
-        # Subtract caught exceptions from propagated exceptions
-        final = subtract_caught_exceptions(propagated, caught_map)
-        {:ok, final}
-
-      {:error, _reason} ->
-        # If try/catch analysis fails, return propagated results (conservative)
-        {:ok, propagated}
-    end
-  end
-
-  # Subtract caught exceptions from propagated exceptions
-  defp subtract_caught_exceptions(exception_map, caught_map) do
-    Map.new(exception_map, fn {mfa, raised_exceptions} ->
-      case Map.get(caught_map, mfa) do
-        nil ->
-          # Function doesn't catch anything
-          {mfa, raised_exceptions}
-
-        caught_exceptions ->
-          # Subtract what's caught from what's raised
-          remaining = Litmus.Exceptions.subtract(raised_exceptions, caught_exceptions)
-          {mfa, remaining}
-      end
-    end)
+    # Return propagated results (conservative - may over-report exceptions)
+    # TODO: Implement exception handling in bidirectional effect system
+    # to properly track try/catch blocks at the type level
+    {:ok, propagated}
   end
 
   # Extract exception information from a function's dependency list

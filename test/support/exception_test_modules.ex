@@ -1,4 +1,4 @@
-defmodule ExceptionTestModules do
+defmodule Support.ExceptionTestModules do
   @moduledoc """
   Test modules for exception propagation testing.
   These need to be in a separate file so they can be compiled with debug_info.

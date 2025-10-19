@@ -1,13 +1,26 @@
-defmodule Litmus.ExceptionPropagationTest do
+defmodule Litmus.BeamAnalysisTest do
   use ExUnit.Case, async: true
 
-  alias ExceptionTestModules.PropagateExample
-  alias ExceptionTestModules.ThrowPropagateExample
-  alias ExceptionTestModules.MultipleCalleesExample
-  alias ExceptionTestModules.DeepPropagateExample
-  alias ExceptionTestModules.MutualRecursionExample
-  alias ExceptionTestModules.UnknownExceptionExample
-  alias ExceptionTestModules.PureExample
+  @moduledoc """
+  Tests that require reading BEAM files directly for analysis.
+
+  These tests are skipped when coverage is enabled because the Cover tool
+  instruments BEAM files, making them unreadable by PURITY's BEAM analyzer.
+
+  Run without coverage: mix test test/purity/beam_analysis_test.exs
+  """
+
+  # Skip these tests when running with --cover
+  # They need clean BEAM files which are modified by coverage instrumentation
+  @moduletag :beam_analysis
+
+  alias Support.ExceptionTestModules.PropagateExample
+  alias Support.ExceptionTestModules.ThrowPropagateExample
+  alias Support.ExceptionTestModules.MultipleCalleesExample
+  alias Support.ExceptionTestModules.DeepPropagateExample
+  alias Support.ExceptionTestModules.MutualRecursionExample
+  alias Support.ExceptionTestModules.UnknownExceptionExample
+  alias Support.ExceptionTestModules.PureExample
 
   describe "exception propagation through call graph" do
     test "propagates exceptions from callees to callers" do
@@ -77,6 +90,55 @@ defmodule Litmus.ExceptionPropagationTest do
       assert Litmus.Exceptions.pure?(info1)
       assert Litmus.Exceptions.pure?(info2)
       assert Litmus.Exceptions.pure?(info3)
+    end
+  end
+
+  describe "analyzing multiple modules together" do
+    test "can analyze Jason and Litmus together" do
+      {:ok, results} = Litmus.analyze_modules([Jason, Litmus.Exceptions])
+
+      # Should have results from both modules
+      # Filter out non-MFA entries from PURITY
+      jason_funcs =
+        results
+        |> Map.keys()
+        |> Enum.filter(fn
+          {mod, _fun, _arity} when is_atom(mod) -> mod == Jason
+          _ -> false
+        end)
+
+      litmus_funcs =
+        results
+        |> Map.keys()
+        |> Enum.filter(fn
+          {mod, _fun, _arity} when is_atom(mod) -> mod == Litmus.Exceptions
+          _ -> false
+        end)
+
+      assert length(jason_funcs) > 0, "Should have Jason functions"
+      assert length(litmus_funcs) > 0, "Should have Litmus.Exceptions functions"
+    end
+
+    test "can use parallel analysis on deps" do
+      {:ok, results} = Litmus.analyze_parallel([Jason, Litmus.Exceptions])
+
+      # Should have results from both modules
+      assert map_size(results) > 0, "Should have analysis results"
+
+      # Verify we got functions from both modules
+      # Filter out non-MFA entries
+      modules =
+        results
+        |> Map.keys()
+        |> Enum.filter(fn
+          {mod, _fun, _arity} when is_atom(mod) -> true
+          _ -> false
+        end)
+        |> Enum.map(fn {mod, _fun, _arity} -> mod end)
+        |> Enum.uniq()
+
+      assert Jason in modules, "Should analyze Jason"
+      assert Litmus.Exceptions in modules, "Should analyze Litmus.Exceptions"
     end
   end
 end

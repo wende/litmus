@@ -7,6 +7,7 @@ defmodule Litmus.Types.Substitution do
   """
 
   alias Litmus.Types.Core
+  alias Litmus.Formatter
 
   @type t :: %{(Core.type_var() | Core.effect_var()) => Core.elixir_type() | Core.effect_type()}
 
@@ -195,13 +196,10 @@ defmodule Litmus.Types.Substitution do
     else
       subst
       |> Enum.map(fn {var, type} ->
-        "#{format_var(var)} ↦ #{Core.format_type(type)}"
+        "#{Formatter.format_var(var)} ↦ #{Formatter.format_type(type)}"
       end)
       |> Enum.join(", ")
       |> then(&"[#{&1}]")
     end
   end
-
-  defp format_var({:type_var, name}), do: to_string(name)
-  defp format_var({:effect_var, name}), do: to_string(name)
 end

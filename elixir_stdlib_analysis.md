@@ -1,32 +1,32 @@
 # Elixir Standard Library Purity Analysis
 
-**Generated:** 2025-10-16T22:57:57.004093Z
+**Generated:** 2025-10-19T10:54:05.159983Z
 
 ## Purity Statistics
 
 | Metric | Count | Percentage |
 |--------|-------|------------|
-| **Total functions** | 3114 | 100.00% |
-| **Modules analyzed** | 124 | - |
+| **Total functions** | 3243 | 100.00% |
+| **Modules analyzed** | 134 | - |
 
 ### By Purity Level
 
 | Purity Level | Functions | Percentage |
 |--------------|-----------|------------|
-| Pure | 2723 | 87.44% |
-| Side Effects | 194 | 6.23% |
-| Dependent | 97 | 3.11% |
-| Unknown | 100 | 3.21% |
+| Pure | 2831 | 87.30% |
+| Side Effects | 208 | 6.41% |
+| Dependent | 104 | 3.21% |
+| Unknown | 100 | 3.08% |
 
 ## Exception Statistics
 
 | Exception Type | Functions | Percentage |
 |----------------|-----------|------------|
-| **Total analyzed** | 4882 | 100.00% |
-| Pure (no exceptions) | 2811 | 57.58% |
-| Raises typed errors | 2058 | 42.15% |
-| Can throw/exit | 64 | 1.31% |
-| Dynamic exceptions | 1967 | 40.29% |
+| **Total analyzed** | 5179 | 100.00% |
+| Pure (no exceptions) | 3000 | 57.93% |
+| Raises typed errors | 2165 | 41.80% |
+| Can throw/exit | 71 | 1.37% |
+| Dynamic exceptions | 2072 | 40.01% |
 
 ## Module Analysis
 
@@ -45,6 +45,7 @@
 | List | 71 | 67 | 2 | 1 | 1 |
 | Task | 69 | 66 | 2 | 1 | 0 |
 | Module.Types.Pattern | 68 | 61 | 2 | 1 | 4 |
+| Exception | 61 | 58 | 2 | 1 | 0 |
 | Map | 60 | 57 | 2 | 1 | 0 |
 | Module.Types | 58 | 55 | 2 | 1 | 0 |
 | Task.Supervised | 55 | 46 | 2 | 1 | 6 |
@@ -92,6 +93,7 @@
 | Mix.SCM.Path | 16 | 13 | 2 | 1 | 0 |
 | Mix.Shell.IO | 16 | 13 | 2 | 1 | 0 |
 | Agent.Server | 16 | 13 | 2 | 1 | 0 |
+| Range | 16 | 13 | 2 | 1 | 0 |
 | Mix.TasksServer | 15 | 12 | 2 | 1 | 0 |
 | Version.Requirement | 15 | 12 | 2 | 1 | 0 |
 | Logger.App | 15 | 12 | 2 | 1 | 0 |
@@ -104,31 +106,37 @@
 | File.Error | 12 | 9 | 2 | 1 | 0 |
 | Mix.SCM | 12 | 9 | 2 | 1 | 0 |
 | Mix.Dep.ElixirSCM | 12 | 9 | 2 | 1 | 0 |
+| Inspect.Opts | 12 | 9 | 2 | 1 | 0 |
+| RuntimeError | 12 | 9 | 2 | 1 | 0 |
 | Enumerable.Function | 11 | 8 | 2 | 1 | 0 |
+| Kernel.ErrorHandler | 11 | 8 | 2 | 1 | 0 |
 | Collectable.Mix.Shell | 9 | 6 | 2 | 1 | 0 |
 | Mix.RemoteConverger | 9 | 6 | 2 | 1 | 0 |
 | Collectable.Map | 9 | 6 | 2 | 1 | 0 |
 | Logger.Filter | 9 | 6 | 2 | 1 | 0 |
 | Path.Wildcard | 9 | 6 | 2 | 1 | 0 |
 | Mix.Tasks.Archive.Check | 9 | 6 | 2 | 1 | 0 |
+| Inspect.Atom | 9 | 6 | 2 | 1 | 0 |
 | Mix.Tasks.Loadpaths | 9 | 6 | 2 | 1 | 0 |
 | List.Chars.BitString | 8 | 5 | 2 | 1 | 0 |
+| String.Chars.Integer | 8 | 5 | 2 | 1 | 0 |
 | String.Chars.Atom | 8 | 5 | 2 | 1 | 0 |
 | Supervisor.Default | 7 | 4 | 2 | 1 | 0 |
 | Mix.Tasks.Deps.Precompile | 7 | 4 | 2 | 1 | 0 |
-| Hex.Utils | 3 | 0 | 2 | 1 | 0 |
-| Hex.Config | 3 | 0 | 2 | 1 | 0 |
-| Hex.Parallel | 3 | 0 | 2 | 1 | 0 |
-| Hex.Server | 3 | 0 | 2 | 1 | 0 |
-| Hex.SCM | 3 | 0 | 2 | 1 | 0 |
-| Hex.State | 3 | 0 | 2 | 1 | 0 |
-| Hex.Application | 3 | 0 | 2 | 1 | 0 |
-| Hex.Registry.Server | 3 | 0 | 2 | 1 | 0 |
-| Hex.UpdateChecker | 3 | 0 | 2 | 1 | 0 |
-| Hex.RemoteConverger | 3 | 0 | 2 | 1 | 0 |
 | Hex.Netrc.Cache | 3 | 0 | 2 | 1 | 0 |
+| Hex.SCM | 3 | 0 | 2 | 1 | 0 |
 | Hex.Repo | 3 | 0 | 2 | 1 | 0 |
 | Hex | 3 | 0 | 2 | 1 | 0 |
+| Hex.UpdateChecker | 3 | 0 | 2 | 1 | 0 |
+| Hex.Utils | 3 | 0 | 2 | 1 | 0 |
+| Hex.Config | 3 | 0 | 2 | 1 | 0 |
+| Hex.Application | 3 | 0 | 2 | 1 | 0 |
+| Hex.Registry.Server | 3 | 0 | 2 | 1 | 0 |
+| Hex.State | 3 | 0 | 2 | 1 | 0 |
+| Hex.Parallel | 3 | 0 | 2 | 1 | 0 |
+| Hex.Server | 3 | 0 | 2 | 1 | 0 |
+| Hex.RemoteConverger | 3 | 0 | 2 | 1 | 0 |
+| Mix.Tasks.Effect | 0 | 0 | 0 | 0 | 0 |
 | Mix.CLI | 0 | 0 | 0 | 0 | 0 |
 | Mix.Hex | 0 | 0 | 0 | 0 | 0 |
 | Kernel | 0 | 0 | 0 | 0 | 0 |
@@ -145,10 +153,12 @@
 | Mix.Rebar | 0 | 0 | 0 | 0 | 0 |
 | Module.ParallelChecker | 0 | 0 | 0 | 0 | 0 |
 | Mix.Tasks.Compile.Protocols | 0 | 0 | 0 | 0 | 0 |
+| Kernel.ParallelCompiler | 0 | 0 | 0 | 0 | 0 |
 | Mix.Tasks.App.Start | 0 | 0 | 0 | 0 | 0 |
 | Mix.Dep.Loader | 0 | 0 | 0 | 0 | 0 |
 | Enum | 0 | 0 | 0 | 0 | 0 |
 | Mix.Utils | 0 | 0 | 0 | 0 | 0 |
+| Protocol | 0 | 0 | 0 | 0 | 0 |
 | Mix.Local | 0 | 0 | 0 | 0 | 0 |
 | Mix.Compilers.Elixir | 0 | 0 | 0 | 0 | 0 |
 | Mix.Project | 0 | 0 | 0 | 0 | 0 |

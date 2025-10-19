@@ -1,4 +1,4 @@
-defmodule SampleModule do
+defmodule Support.SampleModule do
   @moduledoc """
   Sample module demonstrating various effects for analysis.
   """

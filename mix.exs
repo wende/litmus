@@ -25,6 +25,16 @@ defmodule Litmus.MixProject do
         ignore_warnings: ".dialyzer_ignore_warnings",
         plt_add_apps: [:purity, :mix, :iex, :eex],
         paths: ["_build/dev/lib/litmus/ebin", "purity_source/ebin"]
+      ],
+      # Test coverage configuration
+      test_coverage: [tool: ExCoveralls],
+      # Preferred CLI environment for coveralls tasks
+      preferred_cli_env: [
+        coveralls: :test,
+        "coveralls.detail": :test,
+        "coveralls.post": :test,
+        "coveralls.html": :test,
+        "coveralls.json": :test
       ]
     ]
   end
@@ -50,7 +60,9 @@ defmodule Litmus.MixProject do
       # Documentation
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       # Static type checker
-      {:dialyxir, "~> 1.4", only: :dev, runtime: false}
+      {:dialyxir, "~> 1.4", only: :dev, runtime: false},
+      # Code coverage
+      {:excoveralls, "~> 0.18", only: :test}
     ]
   end
 

@@ -61,7 +61,8 @@ defmodule Litmus.Types.Core do
 
   ## Examples
 
-      iex> empty_effect()
+      iex> alias Litmus.Types.Core
+      iex> Core.empty_effect()
       {:effect_empty}
   """
   def empty_effect, do: {:effect_empty}
@@ -71,7 +72,8 @@ defmodule Litmus.Types.Core do
 
   ## Examples
 
-      iex> single_effect(:io)
+      iex> alias Litmus.Types.Core
+      iex> Core.single_effect(:io)
       {:effect_label, :io}
   """
   def single_effect(label) when is_atom(label) do
@@ -85,10 +87,12 @@ defmodule Litmus.Types.Core do
 
   ## Examples
 
-      iex> extend_effect(:exn, empty_effect())
+      iex> alias Litmus.Types.Core
+      iex> Core.extend_effect(:exn, Core.empty_effect())
       {:effect_row, :exn, {:effect_empty}}
 
-      iex> extend_effect(:io, single_effect(:exn))
+      iex> alias Litmus.Types.Core
+      iex> Core.extend_effect(:io, Core.single_effect(:exn))
       {:effect_row, :io, {:effect_label, :exn}}
   """
   def extend_effect(label, tail) when is_atom(label) do
@@ -100,7 +104,8 @@ defmodule Litmus.Types.Core do
 
   ## Examples
 
-      iex> function_type(:int, single_effect(:io), :string)
+      iex> alias Litmus.Types.Core
+      iex> Core.function_type(:int, Core.single_effect(:io), :string)
       {:function, :int, {:effect_label, :io}, :string}
   """
   def function_type(arg_type, effect, return_type) do
@@ -112,7 +117,8 @@ defmodule Litmus.Types.Core do
 
   ## Examples
 
-      iex> forall_type([{:type_var, :a}], {:type_var, :a})
+      iex> alias Litmus.Types.Core
+      iex> Core.forall_type([{:type_var, :a}], {:type_var, :a})
       {:forall, [{:type_var, :a}], {:type_var, :a}}
   """
   def forall_type(vars, body) when is_list(vars) do
@@ -214,77 +220,12 @@ defmodule Litmus.Types.Core do
   end
 
   @doc """
-  Pretty prints a type for display.
-  """
-  def format_type(type) do
-    case type do
-      :int -> "Int"
-      :float -> "Float"
-      :string -> "String"
-      :bool -> "Bool"
-      :atom -> "Atom"
-      :pid -> "Pid"
-      :reference -> "Ref"
-      :any -> "Any"
-
-      {:type_var, name} -> "#{name}"
-
-      {:function, arg, effect, ret} ->
-        "#{format_type(arg)} -> #{format_effect(effect)} #{format_type(ret)}"
-
-      {:tuple, []} -> "{}"
-      {:tuple, types} ->
-        "{" <> Enum.map_join(types, ", ", &format_type/1) <> "}"
-
-      {:list, type} ->
-        "[#{format_type(type)}]"
-
-      {:map, []} -> "%{}"
-      {:map, pairs} ->
-        content = Enum.map_join(pairs, ", ", fn {k, v} ->
-          "#{format_type(k)} => #{format_type(v)}"
-        end)
-        "%{" <> content <> "}"
-
-      {:union, types} ->
-        Enum.map_join(types, " | ", &format_type/1)
-
-      {:forall, vars, body} ->
-        var_str = Enum.map_join(vars, " ", fn
-          {:type_var, name} -> "#{name}"
-          {:effect_var, name} -> "#{name}"
-        end)
-        "∀" <> var_str <> ". " <> format_type(body)
-
-      _ -> inspect(type)
-    end
-  end
-
-  @doc """
-  Pretty prints an effect for display.
-  """
-  def format_effect(effect) do
-    case effect do
-      {:effect_empty} -> "⟨⟩"
-      {:effect_label, label} -> "⟨#{label}⟩"
-      {:effect_var, name} -> "#{name}"
-      {:effect_unknown} -> "¿"
-      {:effect_row, label, tail} -> "⟨#{label} | #{format_effect_tail(tail)}⟩"
-      _ -> inspect(effect)
-    end
-  end
-
-  defp format_effect_tail({:effect_empty}), do: ""
-  defp format_effect_tail({:effect_label, label}), do: "#{label}"
-  defp format_effect_tail({:effect_var, name}), do: "#{name}"
-  defp format_effect_tail({:effect_row, label, tail}), do: "#{label} | #{format_effect_tail(tail)}"
-  defp format_effect_tail(other), do: format_effect(other)
-
-  @doc """
   Converts an effect to compact PURITY library format.
 
   Returns one of:
   - `:p` - pure (no effects)
+  - `:d` - dependent (reads from execution environment)
+  - `:l` - lambda (effects depend on passed lambdas)
   - `:n` - nif
   - `{:e, [exception_types]}` - can raise exceptions
   - `:s` - side effects (io, file, process, network, state, etc.)
@@ -292,16 +233,20 @@ defmodule Litmus.Types.Core do
 
   ## Examples
 
-      iex> to_compact_effect({:effect_empty})
+      iex> alias Litmus.Types.Core
+      iex> Core.to_compact_effect({:effect_empty})
       :p
 
-      iex> to_compact_effect({:effect_label, :exn})
+      iex> alias Litmus.Types.Core
+      iex> Core.to_compact_effect({:effect_label, :exn})
       {:e, [:exn]}
 
-      iex> to_compact_effect({:effect_label, :file})
+      iex> alias Litmus.Types.Core
+      iex> Core.to_compact_effect({:effect_label, :file})
       :s
 
-      iex> to_compact_effect({:effect_row, :file, {:effect_label, :io}})
+      iex> alias Litmus.Types.Core
+      iex> Core.to_compact_effect({:effect_row, :file, {:effect_label, :io}})
       :s
   """
   def to_compact_effect(effect) do
@@ -323,6 +268,14 @@ defmodule Litmus.Types.Core do
       # Has side effects (io, file, process, network, state, etc.)
       has_side_effects?(labels) ->
         :s
+
+      # Lambda-dependent (effects depend on lambda arguments)
+      :lambda in labels ->
+        :l
+
+      # Context-dependent (reads from execution environment)
+      :dependent in labels ->
+        :d
 
       # Only exceptions - return exception types
       Enum.all?(labels, &(&1 == :exn)) ->
@@ -372,35 +325,4 @@ defmodule Litmus.Types.Core do
     end
   end
 
-  @doc """
-  Formats a compact effect for display.
-
-  ## Examples
-
-      iex> format_compact_effect(:p)
-      "p (pure)"
-
-      iex> format_compact_effect(:s)
-      "s (side effects)"
-
-      iex> format_compact_effect(:exn)
-      "e (exceptions)"
-
-      iex> format_compact_effect(:n)
-      "n (nif)"
-
-      iex> format_compact_effect(:u)
-      "u (unknown)"
-  """
-  def format_compact_effect(compact) do
-    case compact do
-      :p -> "p (pure)"
-      :n -> "n (nif)"
-      :s -> "s (side effects)"
-      :exn -> "e (exceptions)"
-      {:e, _} -> "e (exceptions)"
-      :u -> "u (unknown)"
-      other -> inspect(other)
-    end
-  end
 end

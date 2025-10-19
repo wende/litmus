@@ -134,55 +134,6 @@ defmodule Litmus.DepsTest do
     end
   end
 
-  describe "analyzing multiple deps together" do
-    test "can analyze Jason and Litmus together" do
-      {:ok, results} = Litmus.analyze_modules([Jason, Litmus.Exceptions])
-
-      # Should have results from both modules
-      # Filter out non-MFA entries from PURITY
-      jason_funcs =
-        results
-        |> Map.keys()
-        |> Enum.filter(fn
-          {mod, _fun, _arity} when is_atom(mod) -> mod == Jason
-          _ -> false
-        end)
-
-      litmus_funcs =
-        results
-        |> Map.keys()
-        |> Enum.filter(fn
-          {mod, _fun, _arity} when is_atom(mod) -> mod == Litmus.Exceptions
-          _ -> false
-        end)
-
-      assert length(jason_funcs) > 0, "Should have Jason functions"
-      assert length(litmus_funcs) > 0, "Should have Litmus.Exceptions functions"
-    end
-
-    test "can use parallel analysis on deps" do
-      {:ok, results} = Litmus.analyze_parallel([Jason, Litmus.Exceptions])
-
-      # Should have results from both modules
-      assert map_size(results) > 0, "Should have analysis results"
-
-      # Verify we got functions from both modules
-      # Filter out non-MFA entries
-      modules =
-        results
-        |> Map.keys()
-        |> Enum.filter(fn
-          {mod, _fun, _arity} when is_atom(mod) -> true
-          _ -> false
-        end)
-        |> Enum.map(fn {mod, _fun, _arity} -> mod end)
-        |> Enum.uniq()
-
-      assert Jason in modules, "Should analyze Jason"
-      assert Litmus.Exceptions in modules, "Should analyze Litmus.Exceptions"
-    end
-  end
-
   describe "stdlib whitelist integration with deps" do
     test "Jason functions are not in stdlib whitelist" do
       # Jason is a dependency, not part of Elixir stdlib

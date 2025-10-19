@@ -48,13 +48,14 @@ defmodule Mix.Tasks.GenerateEffects do
     # Load all applications to get all modules
     Mix.Task.run("app.start")
 
-    {opts, _, _} = OptionParser.parse(args,
-      switches: [
-        include_deps: :boolean,
-        include_stdlib: :boolean
-      ],
-      aliases: []
-    )
+    {opts, _, _} =
+      OptionParser.parse(args,
+        switches: [
+          include_deps: :boolean,
+          include_stdlib: :boolean
+        ],
+        aliases: []
+      )
 
     include_deps = Keyword.get(opts, :include_deps, false)
     include_stdlib = Keyword.get(opts, :include_stdlib, false)
@@ -87,35 +88,41 @@ defmodule Mix.Tasks.GenerateEffects do
     app_output = Path.join(effects_dir, "generated")
     Builder.export_to_json(app_registry, app_output)
 
-    {app_pure, app_s, app_e, app_n, app_u} = categorize_effects(app_registry)
+    app_counts = categorize_effects(app_registry)
 
     Mix.shell().info("\n✓ Application effects saved to #{app_output}")
     Mix.shell().info("  Total functions: #{map_size(app_registry)}")
-    Mix.shell().info("  • Pure (p):          #{app_pure}")
-    Mix.shell().info("  • Side effects (s):  #{app_s}")
-    Mix.shell().info("  • Exceptions (e):    #{app_e}")
-    Mix.shell().info("  • NIFs (n):          #{app_n}")
-    Mix.shell().info("  • Unknown (u):       #{app_u}")
+    Mix.shell().info("  • Pure (p):          #{app_counts.p}")
+    Mix.shell().info("  • Dependent (d):     #{app_counts.d}")
+    Mix.shell().info("  • Lambda (l):        #{app_counts.l}")
+    Mix.shell().info("  • Side effects (s):  #{app_counts.s}")
+    Mix.shell().info("  • Exceptions (e):    #{app_counts.e}")
+    Mix.shell().info("  • NIFs (n):          #{app_counts.n}")
+    Mix.shell().info("  • Unknown (u):       #{app_counts.u}")
 
     # Build deps registry if requested
     if include_deps do
       Mix.shell().info("\nAnalyzing dependency modules...")
       dep_modules = get_dep_modules(app_name)
-      deps_registry = Builder.build_registry_for_modules(dep_modules, include_stdlib: include_stdlib)
+
+      deps_registry =
+        Builder.build_registry_for_modules(dep_modules, include_stdlib: include_stdlib)
 
       # Export deps registry
       deps_output = Path.join(effects_dir, "deps")
       Builder.export_to_json(deps_registry, deps_output)
 
-      {dep_pure, dep_s, dep_e, dep_n, dep_u} = categorize_effects(deps_registry)
+      dep_counts = categorize_effects(deps_registry)
 
       Mix.shell().info("\n✓ Dependency effects saved to #{deps_output}")
       Mix.shell().info("  Total functions: #{map_size(deps_registry)}")
-      Mix.shell().info("  • Pure (p):          #{dep_pure}")
-      Mix.shell().info("  • Side effects (s):  #{dep_s}")
-      Mix.shell().info("  • Exceptions (e):    #{dep_e}")
-      Mix.shell().info("  • NIFs (n):          #{dep_n}")
-      Mix.shell().info("  • Unknown (u):       #{dep_u}")
+      Mix.shell().info("  • Pure (p):          #{dep_counts.p}")
+      Mix.shell().info("  • Dependent (d):     #{dep_counts.d}")
+      Mix.shell().info("  • Lambda (l):        #{dep_counts.l}")
+      Mix.shell().info("  • Side effects (s):  #{dep_counts.s}")
+      Mix.shell().info("  • Exceptions (e):    #{dep_counts.e}")
+      Mix.shell().info("  • NIFs (n):          #{dep_counts.n}")
+      Mix.shell().info("  • Unknown (u):       #{dep_counts.u}")
     end
 
     Mix.shell().info("\n╔═══════════════════════════════════════════════════════╗")
@@ -125,9 +132,10 @@ defmodule Mix.Tasks.GenerateEffects do
 
   defp discover_modules_from_paths(paths) do
     # Find all .ex files in the specified paths
-    source_files = Enum.flat_map(paths, fn path ->
-      Path.wildcard("#{path}/**/*.ex")
-    end)
+    source_files =
+      Enum.flat_map(paths, fn path ->
+        Path.wildcard("#{path}/**/*.ex")
+      end)
 
     # Extract module names from source files
     Enum.flat_map(source_files, fn file ->
@@ -160,15 +168,15 @@ defmodule Mix.Tasks.GenerateEffects do
   end
 
   defp categorize_effects(registry) do
-    Enum.reduce(registry, {0, 0, 0, 0, 0}, fn {_mfa, effect}, {p, s, e, n, u} ->
-      case effect do
-        :p -> {p + 1, s, e, n, u}
-        :s -> {p, s + 1, e, n, u}
-        :exn -> {p, s, e + 1, n, u}
-        :n -> {p, s, e, n + 1, u}
-        :u -> {p, s, e, n, u + 1}
-        _ -> {p, s, e, n, u + 1}
-      end
+    initial_counts = %{p: 0, d: 0, l: 0, s: 0, e: 0, n: 0, u: 0}
+
+    Enum.reduce(registry, initial_counts, fn {_mfa, effect}, acc ->
+      key = normalize_effect(effect)
+      Map.update!(acc, key, &(&1 + 1))
     end)
   end
+
+  defp normalize_effect(:exn), do: :e
+  defp normalize_effect(effect) when effect in [:p, :d, :l, :s, :e, :n, :u], do: effect
+  defp normalize_effect(_), do: :u
 end

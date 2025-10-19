@@ -76,8 +76,8 @@ defmodule Litmus.Inference.Bidirectional do
         # Other atoms (like :ok, :error, etc.)
         handle_literal(:atom, context, mode, expected)
 
-      # Variables
-      {name, _, nil} when is_atom(name) ->
+      # Variables (third element can be nil or a module context)
+      {name, _, context_atom} when is_atom(name) and is_atom(context_atom) ->
         handle_variable(name, context, mode, expected)
 
       # Binary/bitstring construction (string interpolation compiles to this)
@@ -107,8 +107,13 @@ defmodule Litmus.Inference.Bidirectional do
         # Operators are Kernel functions
         handle_function_capture({:__aliases__, [], [:Kernel]}, operator, arity, context, mode, expected)
 
-      {func, meta, args} when is_atom(func) and is_list(args) ->
-        handle_local_call(func, meta, args, context, mode, expected)
+      # Block (MUST come before local call pattern!)
+      {:__block__, _, expressions} ->
+        handle_block(expressions, context, mode, expected)
+
+      # Module aliases (e.g., ArgumentError, MyModule) - these are compile-time, no effects
+      {:__aliases__, _, _parts} ->
+        handle_literal(:atom, context, mode, expected)
 
       # Let binding (Elixir's = is more complex, simplified here)
       {:=, _, [pattern, body]} ->
@@ -122,9 +127,8 @@ defmodule Litmus.Inference.Bidirectional do
       {:case, _, [scrutinee, [do: clauses]]} ->
         handle_case(scrutinee, clauses, context, mode, expected)
 
-      # Block
-      {:__block__, _, expressions} ->
-        handle_block(expressions, context, mode, expected)
+      {func, meta, args} when is_atom(func) and is_list(args) ->
+        handle_local_call(func, meta, args, context, mode, expected)
 
       # Tuple
       {:{}, _, elements} ->
@@ -222,16 +226,23 @@ defmodule Litmus.Inference.Bidirectional do
         arg_substs = Enum.map(arg_results, fn {:ok, _, _, subst} -> subst end)
 
         # Special handling for higher-order functions
-        # Extract lambda effects ONLY for functions marked as 'u' (unknown) in the registry
-        # For all other effects (pure, side effects, exceptions), trust the registry
+        # Extract lambda effects for:
+        # 1. Functions marked as 'u' (unknown) - we need to infer from the lambda
+        # 2. Functions marked as 'l' (lambda-dependent) - the effect depends on the lambda
 
         # Check if there are any lambda arguments
         has_lambda_args = Enum.any?(arg_types, &match?({:function, _, _, _}, &1))
 
         # Extract lambda effects if:
-        # 1. There are lambda arguments
-        # 2. The registry effect is unknown (we need to infer from the lambda)
-        should_extract_lambda_effects = has_lambda_args and match?({:effect_unknown}, effect)
+        # 1. There are lambda arguments, AND
+        # 2. The registry effect is unknown OR lambda-dependent
+        is_lambda_dependent = case effect do
+          {:effect_label, :lambda} -> true
+          {:effect_row, labels, _} -> :lambda in labels
+          _ -> false
+        end
+        should_extract_lambda_effects = has_lambda_args and
+                                       (match?({:effect_unknown}, effect) or is_lambda_dependent)
 
         combined_effect = if should_extract_lambda_effects do
           # Extract effects from lambda arguments
@@ -245,10 +256,20 @@ defmodule Litmus.Inference.Bidirectional do
               []
           end)
 
-          # When the registry effect is unknown, use ONLY lambda + arg effects
-          # Don't include the unknown effect itself in the combination
+          # For lambda-dependent functions, use the lambda's actual effects
+          # For unknown functions, infer from lambda + arg effects
           all_effects = arg_effects ++ lambda_effects
-          Enum.reduce(all_effects, Core.empty_effect(), &Effects.combine_effects/2)
+          inferred_effect = Enum.reduce(all_effects, Core.empty_effect(), &Effects.combine_effects/2)
+
+          # Only wrap with :lambda if the inferred effect has unknown/variable effects
+          # If all lambda effects are concrete (pure, side effects, etc.), use those directly
+          if Enum.any?(lambda_effects, &match?({:effect_unknown}, &1)) do
+            # Has unknown lambda effects, mark as lambda-dependent
+            Effects.combine_effects({:effect_label, :lambda}, inferred_effect)
+          else
+            # All lambda effects are known, use them directly
+            inferred_effect
+          end
         else
           # Normal function or function with concrete effects in registry:
           # Just combine argument construction effects with function's effect from registry
@@ -516,7 +537,8 @@ defmodule Litmus.Inference.Bidirectional do
   defp handle_let(pattern, body, context, _mode, _expected) do
     # Simplified: only handle simple variable patterns
     case pattern do
-      {var_name, _, nil} when is_atom(var_name) ->
+      # Variable pattern can have any atom context (nil, Elixir, module name, etc.)
+      {var_name, _, context_atom} when is_atom(var_name) and is_atom(context_atom) ->
         # Synthesize type of body
         case synthesize(body, context) do
           {:ok, body_type, body_effect, subst} ->
@@ -621,7 +643,46 @@ defmodule Litmus.Inference.Bidirectional do
   end
 
   defp handle_block([expr | rest], context, _mode, _expected) do
-    # Synthesize first expression for its effect
+    # Special handling for let bindings to thread context
+    case expr do
+      {:=, _, [pattern, body]} when is_tuple(pattern) ->
+        # Let binding - extract variable name and synthesize body
+        case pattern do
+          {var_name, _, context_atom} when is_atom(var_name) and is_atom(context_atom) ->
+            # Synthesize the right-hand side
+            case synthesize(body, context) do
+              {:ok, body_type, body_effect, subst} ->
+                # Add variable to context for subsequent expressions
+                new_context = Context.add(context, var_name, body_type)
+
+                # Continue with rest of block using updated context
+                case handle_block(rest, new_context, :synthesis, nil) do
+                  {:ok, rest_type, rest_effect, rest_subst} ->
+                    combined_effect = Effects.combine_effects(body_effect, rest_effect)
+                    combined_subst = Substitution.compose(subst, rest_subst)
+                    {:ok, rest_type, combined_effect, combined_subst}
+
+                  error ->
+                    error
+                end
+
+              error ->
+                error
+            end
+
+          _ ->
+            # Complex pattern - fall back to default handling
+            synthesize_expr_and_continue(expr, rest, context)
+        end
+
+      _ ->
+        # Not a let binding - normal handling
+        synthesize_expr_and_continue(expr, rest, context)
+    end
+  end
+
+  # Helper for non-let expressions in blocks
+  defp synthesize_expr_and_continue(expr, rest, context) do
     case synthesize(expr, context) do
       {:ok, _type, effect, subst} ->
         # Update context with substitution

@@ -9,7 +9,8 @@ defmodule Litmus.Types.Unification do
   to constraints like ⟨exn | μ⟩ ∼ ⟨exn⟩ (solution: μ = ⟨⟩).
   """
 
-  alias Litmus.Types.{Core, Substitution}
+  alias Litmus.Types.Substitution
+  alias Litmus.Formatter
 
   @type unify_result :: {:ok, Substitution.t()} | {:error, term()}
 
@@ -65,8 +66,8 @@ defmodule Litmus.Types.Unification do
       # Map types (simplified - would need more complex handling in practice)
       {{:map, pairs1}, {:map, pairs2}} when length(pairs1) == length(pairs2) ->
         # Sort by key for comparison
-        sorted1 = Enum.sort_by(pairs1, fn {k, _} -> Core.format_type(k) end)
-        sorted2 = Enum.sort_by(pairs2, fn {k, _} -> Core.format_type(k) end)
+        sorted1 = Enum.sort_by(pairs1, fn {k, _} -> Formatter.format_type(k) end)
+        sorted2 = Enum.sort_by(pairs2, fn {k, _} -> Formatter.format_type(k) end)
         unify_pairs(sorted1, sorted2, subst)
 
       # Union types (simplified)

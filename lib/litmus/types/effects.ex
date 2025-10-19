@@ -14,10 +14,12 @@ defmodule Litmus.Types.Effects do
 
   ## Examples
 
-      iex> combine_effects({:effect_label, :io}, {:effect_label, :exn})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.combine_effects({:effect_label, :io}, {:effect_label, :exn})
       {:effect_row, :io, {:effect_label, :exn}}
 
-      iex> combine_effects({:effect_empty}, {:effect_label, :io})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.combine_effects({:effect_empty}, {:effect_label, :io})
       {:effect_label, :io}
   """
   def combine_effects({:effect_empty}, effect2), do: effect2
@@ -48,10 +50,12 @@ defmodule Litmus.Types.Effects do
 
   ## Examples
 
-      iex> remove_effect(:exn, {:effect_row, :exn, {:effect_label, :io}})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.remove_effect(:exn, {:effect_row, :exn, {:effect_label, :io}})
       {{:effect_label, :io}, true}
 
-      iex> remove_effect(:exn, {:effect_row, :exn, {:effect_row, :exn, {:effect_empty}}})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.remove_effect(:exn, {:effect_row, :exn, {:effect_row, :exn, {:effect_empty}}})
       {{:effect_row, :exn, {:effect_empty}}, true}  # Removes only first occurrence
   """
   def remove_effect(_label, {:effect_empty}) do
@@ -91,10 +95,12 @@ defmodule Litmus.Types.Effects do
 
   ## Examples
 
-      iex> has_effect?(:io, {:effect_row, :io, {:effect_label, :exn}})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.has_effect?(:io, {:effect_row, :io, {:effect_label, :exn}})
       true
 
-      iex> has_effect?(:state, {:effect_label, :io})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.has_effect?(:state, {:effect_label, :io})
       false
   """
   def has_effect?(_label, {:effect_empty}), do: false
@@ -109,10 +115,12 @@ defmodule Litmus.Types.Effects do
 
   ## Examples
 
-      iex> is_pure?({:effect_empty})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.is_pure?({:effect_empty})
       true
 
-      iex> is_pure?({:effect_label, :io})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.is_pure?({:effect_label, :io})
       false
   """
   def is_pure?({:effect_empty}), do: true
@@ -125,7 +133,8 @@ defmodule Litmus.Types.Effects do
 
   ## Examples
 
-      iex> flatten_effect({:effect_row, :io, {:effect_row, :exn, {:effect_empty}}})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.flatten_effect({:effect_row, :io, {:effect_row, :exn, {:effect_empty}}})
       {:effect_row, :io, {:effect_row, :exn, {:effect_empty}}}
   """
   def flatten_effect({:effect_empty} = e), do: e
@@ -142,10 +151,12 @@ defmodule Litmus.Types.Effects do
 
   ## Examples
 
-      iex> from_list([:io, :exn, :state])
+      iex> alias Litmus.Types.Effects
+      iex> Effects.from_list([:io, :exn, :state])
       {:effect_row, :io, {:effect_row, :exn, {:effect_label, :state}}}
 
-      iex> from_list([])
+      iex> alias Litmus.Types.Effects
+      iex> Effects.from_list([])
       {:effect_empty}
   """
   def from_list([]), do: {:effect_empty}
@@ -161,10 +172,12 @@ defmodule Litmus.Types.Effects do
 
   ## Examples
 
-      iex> to_list({:effect_row, :io, {:effect_label, :exn}})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.to_list({:effect_row, :io, {:effect_label, :exn}})
       [:io, :exn]
 
-      iex> to_list({:effect_var, :e})
+      iex> alias Litmus.Types.Effects
+      iex> Effects.to_list({:effect_var, :e})
       :unknown
   """
   def to_list({:effect_empty}), do: []
@@ -199,14 +212,26 @@ defmodule Litmus.Types.Effects do
       # Pure function - no effects
       :p -> {:effect_empty}
 
-      # Exception - can raise
+      # Dependent - reads from execution environment
+      :d -> {:effect_label, :dependent}
+
+      # Lambda - effects depend on passed lambdas
+      :l -> {:effect_label, :lambda}
+
+      # Exception - can raise (atom format from JSON)
       :exn -> {:effect_label, :exn}
+
+      # Exception - can raise (tuple format from runtime cache)
+      {:e, _types} -> {:effect_label, :exn}
 
       # Side effects - map to generic state effect since we don't distinguish fine-grained categories
       :s -> determine_specific_effect(module, function, arity)
 
       # NIF - native implemented function
       :n -> {:effect_label, :nif}
+
+      # Unknown (atom) or not in registry
+      :u -> {:effect_unknown}
 
       # Unknown or not in registry
       _ -> {:effect_unknown}

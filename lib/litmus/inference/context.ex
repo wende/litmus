@@ -12,6 +12,7 @@ defmodule Litmus.Inference.Context do
   """
 
   alias Litmus.Types.{Core, Substitution}
+  alias Litmus.Formatter
 
   @type t :: %__MODULE__{
     bindings: %{atom() => Core.elixir_type()},
@@ -194,7 +195,7 @@ defmodule Litmus.Inference.Context do
   def format(%__MODULE__{bindings: bindings, effects: effects, scope_level: level}) do
     binding_str = bindings
                   |> Enum.map(fn {name, type} ->
-                    "  #{name} : #{Core.format_type(type)}"
+                    "  #{name} : #{Formatter.format_type(type)}"
                   end)
                   |> Enum.join("\n")
 
@@ -202,7 +203,7 @@ defmodule Litmus.Inference.Context do
       "  (none)"
     else
       effects
-      |> Enum.map(&Core.format_effect/1)
+      |> Enum.map(&Formatter.format_effect/1)
       |> Enum.join(", ")
       |> then(&"  #{&1}")
     end

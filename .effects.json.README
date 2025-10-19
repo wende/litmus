@@ -10,8 +10,10 @@ This file contains effect definitions for ALL Elixir and Erlang standard library
 
 2. **Effect Types**:
    - "p" = pure (no side effects, no exceptions)
+   - "d" = dependent (reads from execution environment: time, process dict, env vars, ETS)
+   - "l" = lambda (effects depend on passed lambdas/higher-order functions)
    - "n" = nif (native implemented function)
-   - "s" = side effects (io, file, process, network, state, ets, time, random)
+   - "s" = side effects (io, file, process, network, state mutations, writes)
    - {"e": ["exn"]} = can raise exceptions
    - "u" = unknown (avoid using for stdlib)
 
