@@ -27,3 +27,7 @@ litmus-*.tar
 
 # Generated effects registry
 /.effects/
+
+# Git worktrees (Crystal)
+/worktrees/
+/worktree-*/
