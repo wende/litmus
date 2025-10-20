@@ -22,45 +22,70 @@ defmodule Litmus.Formatter do
   """
   def format_type(type) do
     case type do
-      :int -> "Int"
-      :float -> "Float"
-      :string -> "String"
-      :bool -> "Bool"
-      :atom -> "Atom"
-      :pid -> "Pid"
-      :reference -> "Ref"
-      :any -> "Any"
+      :int ->
+        "Int"
 
-      {:type_var, name} -> "#{name}"
+      :float ->
+        "Float"
+
+      :string ->
+        "String"
+
+      :bool ->
+        "Bool"
+
+      :atom ->
+        "Atom"
+
+      :pid ->
+        "Pid"
+
+      :reference ->
+        "Ref"
+
+      :any ->
+        "Any"
+
+      {:type_var, name} ->
+        "#{name}"
 
       {:function, arg, effect, ret} ->
         "#{format_type(arg)} -> #{format_effect(effect)} #{format_type(ret)}"
 
-      {:tuple, []} -> "{}"
+      {:tuple, []} ->
+        "{}"
+
       {:tuple, types} ->
         "{" <> Enum.map_join(types, ", ", &format_type/1) <> "}"
 
       {:list, type} ->
         "[#{format_type(type)}]"
 
-      {:map, []} -> "%{}"
+      {:map, []} ->
+        "%{}"
+
       {:map, pairs} ->
-        content = Enum.map_join(pairs, ", ", fn {k, v} ->
-          "#{format_type(k)} => #{format_type(v)}"
-        end)
+        content =
+          Enum.map_join(pairs, ", ", fn {k, v} ->
+            "#{format_type(k)} => #{format_type(v)}"
+          end)
+
         "%{" <> content <> "}"
 
       {:union, types} ->
         Enum.map_join(types, " | ", &format_type/1)
 
       {:forall, vars, body} ->
-        var_str = Enum.map_join(vars, " ", fn
-          {:type_var, name} -> "#{name}"
-          {:effect_var, name} -> "#{name}"
-        end)
+        var_str =
+          Enum.map_join(vars, " ", fn
+            {:type_var, name} -> "#{name}"
+            {:effect_var, name} -> "#{name}"
+          end)
+
         "∀" <> var_str <> ". " <> format_type(body)
 
-      _ -> inspect(type)
+      _ ->
+        inspect(type)
     end
   end
 
@@ -72,11 +97,23 @@ defmodule Litmus.Formatter do
       iex> format_effect({:effect_empty})
       "⟨⟩"
 
-      iex> format_effect({:effect_label, :io})
-      "⟨io⟩"
+      iex> format_effect({:effect_label, :exn})
+      "⟨exn⟩"
 
-      iex> format_effect({:effect_row, :io, {:effect_label, :file}})
-      "⟨io | file⟩"
+      iex> format_effect({:s, ["File.write/2"]})
+      "⟨File.write/2⟩"
+
+      iex> format_effect({:s, ["File.write/2", "IO.puts/1"]})
+      "⟨File.write/2 | IO.puts/1⟩"
+
+      iex> format_effect({:d, ["System.get_env/1"]})
+      "⟨System.get_env/1⟩"
+
+      iex> format_effect({:d, ["System.get_env/1", "Process.get/1"]})
+      "⟨System.get_env/1 | Process.get/1⟩"
+
+      iex> format_effect({:effect_row, :exn, {:s, ["File.write/2"]}})
+      "⟨exn | File.write/2⟩"
   """
   def format_effect(effect) do
     case effect do
@@ -84,15 +121,28 @@ defmodule Litmus.Formatter do
       {:effect_label, label} -> "⟨#{label}⟩"
       {:effect_var, name} -> "#{name}"
       {:effect_unknown} -> "¿"
-      {:effect_row, label, tail} -> "⟨#{label} | #{format_effect_tail(tail)}⟩"
+      {:s, [single]} -> "⟨#{single}⟩"
+      {:s, multiple} -> "⟨#{Enum.join(multiple, " | ")}⟩"
+      {:d, [single]} -> "⟨#{single}⟩"
+      {:d, multiple} -> "⟨#{Enum.join(multiple, " | ")}⟩"
+      {:effect_row, label, tail} -> "⟨#{format_first_label(label)} | #{format_effect_tail(tail)}⟩"
       _ -> inspect(effect)
     end
   end
 
+  defp format_first_label({:s, list}), do: Enum.join(list, " | ")
+  defp format_first_label({:d, list}), do: Enum.join(list, " | ")
+  defp format_first_label(label), do: "#{label}"
+
   defp format_effect_tail({:effect_empty}), do: ""
   defp format_effect_tail({:effect_label, label}), do: "#{label}"
   defp format_effect_tail({:effect_var, name}), do: "#{name}"
-  defp format_effect_tail({:effect_row, label, tail}), do: "#{label} | #{format_effect_tail(tail)}"
+  defp format_effect_tail({:s, list}), do: Enum.join(list, " | ")
+  defp format_effect_tail({:d, list}), do: Enum.join(list, " | ")
+
+  defp format_effect_tail({:effect_row, label, tail}),
+    do: "#{format_first_label(label)} | #{format_effect_tail(tail)}"
+
   defp format_effect_tail(other), do: format_effect(other)
 
   @doc """

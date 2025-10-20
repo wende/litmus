@@ -133,8 +133,8 @@ defmodule Litmus.EffectsClosureTest do
 
   describe "higher-order functions" do
     @tag :skip
-    test "function taking callback with effects (NOT YET SUPPORTED)" do
-      # TODO: Requires tracking closures passed as parameters
+    test "function taking callback with effects [LIMITATION: Same as map with effectful function]" do
+      # Same limitation as "map with effectful function" test above
       result =
         effect do
           process = fn callback ->
@@ -171,8 +171,18 @@ defmodule Litmus.EffectsClosureTest do
     # end
 
     @tag :skip
-    test "map with effectful function (NOT YET SUPPORTED)" do
-      # TODO: Requires transforming closures passed to higher-order functions
+    test "map with effectful function [LIMITATION: Closures passed to external higher-order functions are not transformed]" do
+      # LIMITATION: The effect transformer doesn't recursively transform lambdas passed to
+      # higher-order functions. When `Enum.map` is called with a lambda containing effects,
+      # the lambda body is not transformed to use the effect handler.
+      #
+      # To support this would require:
+      # 1. Detecting when a lambda is passed to a higher-order function
+      # 2. Recursively transforming the lambda body to CPS form
+      # 3. Ensuring the transformed lambda closes over the __handler__ variable
+      #
+      # Current workaround: Define and call higher-order functions within the effect block
+      # (see "inline higher-order function works" test below)
       result =
         effect do
           paths = ["a.txt", "b.txt", "c.txt"]
@@ -187,6 +197,7 @@ defmodule Litmus.EffectsClosureTest do
           {File, :read!, ["a.txt"]} -> "A"
           {File, :read!, ["b.txt"]} -> "B"
           {File, :read!, ["c.txt"]} -> "C"
+          {Enum, func, args} -> apply(Enum, func, args)
         end
 
       assert result == "A, B, C"

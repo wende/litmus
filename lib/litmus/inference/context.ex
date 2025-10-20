@@ -15,10 +15,10 @@ defmodule Litmus.Inference.Context do
   alias Litmus.Formatter
 
   @type t :: %__MODULE__{
-    bindings: %{atom() => Core.elixir_type()},
-    effects: list(Core.effect_type()),
-    scope_level: non_neg_integer()
-  }
+          bindings: %{atom() => Core.elixir_type()},
+          effects: list(Core.effect_type()),
+          scope_level: non_neg_integer()
+        }
 
   defstruct bindings: %{},
             effects: [],
@@ -107,9 +107,11 @@ defmodule Litmus.Inference.Context do
   Applies a substitution to all types in the context.
   """
   def apply_substitution(%__MODULE__{bindings: bindings} = ctx, subst) do
-    new_bindings = Map.new(bindings, fn {name, type} ->
-      {name, Substitution.apply_subst(subst, type)}
-    end)
+    new_bindings =
+      Map.new(bindings, fn {name, type} ->
+        {name, Substitution.apply_subst(subst, type)}
+      end)
+
     %{ctx | bindings: new_bindings}
   end
 
@@ -159,12 +161,10 @@ defmodule Litmus.Inference.Context do
       {:*, {:function, {:tuple, [:int, :int]}, Core.empty_effect(), :int}},
 
       # Comparisons
-      {:==, {:function, {:tuple, [{:type_var, :a}, {:type_var, :a}]},
-             Core.empty_effect(), :bool}},
-      {:<, {:function, {:tuple, [{:type_var, :a}, {:type_var, :a}]},
-            Core.empty_effect(), :bool}},
-      {:>, {:function, {:tuple, [{:type_var, :a}, {:type_var, :a}]},
-            Core.empty_effect(), :bool}},
+      {:==,
+       {:function, {:tuple, [{:type_var, :a}, {:type_var, :a}]}, Core.empty_effect(), :bool}},
+      {:<, {:function, {:tuple, [{:type_var, :a}, {:type_var, :a}]}, Core.empty_effect(), :bool}},
+      {:>, {:function, {:tuple, [{:type_var, :a}, {:type_var, :a}]}, Core.empty_effect(), :bool}},
 
       # Boolean operations
       {:and, {:function, {:tuple, [:bool, :bool]}, Core.empty_effect(), :bool}},
@@ -172,18 +172,15 @@ defmodule Litmus.Inference.Context do
       {:not, {:function, :bool, Core.empty_effect(), :bool}},
 
       # List operations (with potential exceptions)
-      {:hd, {:forall, [{:type_var, :a}],
-             {:function, {:list, {:type_var, :a}},
-              Core.single_effect(:exn),
-              {:type_var, :a}}}},
-      {:tl, {:forall, [{:type_var, :a}],
-             {:function, {:list, {:type_var, :a}},
-              Core.single_effect(:exn),
-              {:list, {:type_var, :a}}}}},
-      {:length, {:forall, [{:type_var, :a}],
-                 {:function, {:list, {:type_var, :a}},
-                  Core.empty_effect(),
-                  :int}}}
+      {:hd,
+       {:forall, [{:type_var, :a}],
+        {:function, {:list, {:type_var, :a}}, Core.single_effect(:exn), {:type_var, :a}}}},
+      {:tl,
+       {:forall, [{:type_var, :a}],
+        {:function, {:list, {:type_var, :a}}, Core.single_effect(:exn), {:list, {:type_var, :a}}}}},
+      {:length,
+       {:forall, [{:type_var, :a}],
+        {:function, {:list, {:type_var, :a}}, Core.empty_effect(), :int}}}
     ]
 
     add_bindings(empty(), stdlib_bindings)
@@ -193,20 +190,22 @@ defmodule Litmus.Inference.Context do
   Pretty prints the context for debugging.
   """
   def format(%__MODULE__{bindings: bindings, effects: effects, scope_level: level}) do
-    binding_str = bindings
-                  |> Enum.map(fn {name, type} ->
-                    "  #{name} : #{Formatter.format_type(type)}"
-                  end)
-                  |> Enum.join("\n")
+    binding_str =
+      bindings
+      |> Enum.map(fn {name, type} ->
+        "  #{name} : #{Formatter.format_type(type)}"
+      end)
+      |> Enum.join("\n")
 
-    effect_str = if Enum.empty?(effects) do
-      "  (none)"
-    else
-      effects
-      |> Enum.map(&Formatter.format_effect/1)
-      |> Enum.join(", ")
-      |> then(&"  #{&1}")
-    end
+    effect_str =
+      if Enum.empty?(effects) do
+        "  (none)"
+      else
+        effects
+        |> Enum.map(&Formatter.format_effect/1)
+        |> Enum.join(", ")
+        |> then(&"  #{&1}")
+      end
 
     """
     Context (scope level: #{level}):

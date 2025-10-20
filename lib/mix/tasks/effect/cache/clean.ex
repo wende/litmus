@@ -33,8 +33,7 @@ defmodule Mix.Tasks.Effect.Cache.Clean do
 
     # Clean cache files
     if File.dir?(cache_dir) do
-      cache_files =
-        Path.wildcard(Path.join(cache_dir, "**/*.cache"))
+      cache_files = Path.wildcard(Path.join(cache_dir, "**/*.cache"))
 
       if cache_files == [] do
         Mix.shell().info("No cache files found in #{cache_dir}")
@@ -51,6 +50,7 @@ defmodule Mix.Tasks.Effect.Cache.Clean do
     Mix.shell().info("Recompiling Litmus.Effects.Registry to reload .effects.json...")
 
     registry_beam = "_build/#{Mix.env()}/lib/litmus/ebin/Elixir.Litmus.Effects.Registry.beam"
+
     if File.exists?(registry_beam) do
       File.rm!(registry_beam)
       Mix.shell().info("Removed compiled Registry module")

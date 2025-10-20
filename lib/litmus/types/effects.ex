@@ -6,24 +6,60 @@ defmodule Litmus.Types.Effects do
   enabling proper treatment of nested effect contexts (e.g., nested exception handlers).
   """
 
-
   @doc """
   Combines two effects into a single effect row.
 
   Handles duplicate labels correctly for nested contexts.
+  Side effects and dependent effects are merged into single {:s, list} and {:d, list} when possible.
 
   ## Examples
 
       iex> alias Litmus.Types.Effects
-      iex> Effects.combine_effects({:effect_label, :io}, {:effect_label, :exn})
-      {:effect_row, :io, {:effect_label, :exn}}
+      iex> Effects.combine_effects({:effect_label, :exn}, {:effect_label, :lambda})
+      {:effect_row, :exn, {:effect_label, :lambda}}
 
       iex> alias Litmus.Types.Effects
-      iex> Effects.combine_effects({:effect_empty}, {:effect_label, :io})
-      {:effect_label, :io}
+      iex> Effects.combine_effects({:effect_empty}, {:effect_label, :exn})
+      {:effect_label, :exn}
+
+      iex> alias Litmus.Types.Effects
+      iex> Effects.combine_effects({:s, ["File.read/1"]}, {:s, ["IO.puts/1"]})
+      {:s, ["File.read/1", "IO.puts/1"]}
+
+      iex> alias Litmus.Types.Effects
+      iex> Effects.combine_effects({:d, ["System.get_env/1"]}, {:d, ["Process.get/1"]})
+      {:d, ["System.get_env/1", "Process.get/1"]}
   """
   def combine_effects({:effect_empty}, effect2), do: effect2
   def combine_effects(effect1, {:effect_empty}), do: effect1
+
+  # Combine two side effect lists
+  def combine_effects({:s, list1}, {:s, list2}) do
+    {:s, list1 ++ list2}
+  end
+
+  # Combine two dependent effect lists
+  def combine_effects({:d, list1}, {:d, list2}) do
+    {:d, list1 ++ list2}
+  end
+
+  # Combine side effect with other effects
+  def combine_effects({:s, _list} = s, effect) do
+    {:effect_row, s, effect}
+  end
+
+  def combine_effects(effect, {:s, _list} = s) do
+    {:effect_row, extract_label(effect), s}
+  end
+
+  # Combine dependent effect with other effects
+  def combine_effects({:d, _list} = d, effect) do
+    {:effect_row, d, effect}
+  end
+
+  def combine_effects(effect, {:d, _list} = d) do
+    {:effect_row, extract_label(effect), d}
+  end
 
   def combine_effects({:effect_label, l1}, {:effect_label, l2}) do
     {:effect_row, l1, {:effect_label, l2}}
@@ -37,8 +73,22 @@ defmodule Litmus.Types.Effects do
     {:effect_row, l, combine_effects(tail, effect)}
   end
 
+  # Combine two effect variables - keep as separate variables in a row
+  def combine_effects({:effect_var, _} = v1, {:effect_var, _} = v2) do
+    {:effect_row, v1, v2}
+  end
+
+  # Combine effect variable with other effects
+  def combine_effects({:effect_var, _} = v, effect) do
+    {:effect_row, v, effect}
+  end
+
+  def combine_effects(effect, {:effect_var, _} = v) do
+    {:effect_row, extract_label(effect), v}
+  end
+
   def combine_effects(effect1, effect2) do
-    # For variables and unknowns, create a row
+    # For unknowns and other cases, create a row
     {:effect_row, extract_label(effect1), effect2}
   end
 
@@ -78,6 +128,7 @@ defmodule Litmus.Types.Effects do
   def remove_effect(label, {:effect_row, l, tail}) do
     # Not this label, continue searching
     {new_tail, found} = remove_effect(label, tail)
+
     if found do
       {{:effect_row, l, new_tail}, true}
     else
@@ -96,19 +147,26 @@ defmodule Litmus.Types.Effects do
   ## Examples
 
       iex> alias Litmus.Types.Effects
-      iex> Effects.has_effect?(:io, {:effect_row, :io, {:effect_label, :exn}})
+      iex> Effects.has_effect?(:exn, {:effect_row, :exn, {:effect_label, :lambda}})
       true
 
       iex> alias Litmus.Types.Effects
-      iex> Effects.has_effect?(:state, {:effect_label, :io})
+      iex> Effects.has_effect?(:exn, {:effect_label, :lambda})
       false
   """
   def has_effect?(_label, {:effect_empty}), do: false
   def has_effect?(label, {:effect_label, l}), do: label == l
+  # Side effects don't match label queries
+  def has_effect?(_label, {:s, _list}), do: false
+  # Dependent effects don't match label queries
+  def has_effect?(_label, {:d, _list}), do: false
+
   def has_effect?(label, {:effect_row, l, tail}) do
     label == l or has_effect?(label, tail)
   end
-  def has_effect?(_label, _), do: :unknown  # For variables and unknowns
+
+  # For variables and unknowns
+  def has_effect?(_label, _), do: :unknown
 
   @doc """
   Checks if an effect is pure (empty).
@@ -134,13 +192,17 @@ defmodule Litmus.Types.Effects do
   ## Examples
 
       iex> alias Litmus.Types.Effects
-      iex> Effects.flatten_effect({:effect_row, :io, {:effect_row, :exn, {:effect_empty}}})
-      {:effect_row, :io, {:effect_row, :exn, {:effect_empty}}}
+      iex> Effects.flatten_effect({:effect_row, :exn, {:effect_row, :lambda, {:effect_empty}}})
+      {:effect_row, :exn, {:effect_row, :lambda, {:effect_empty}}}
   """
   def flatten_effect({:effect_empty} = e), do: e
   def flatten_effect({:effect_label, _} = e), do: e
   def flatten_effect({:effect_var, _} = e), do: e
   def flatten_effect({:effect_unknown} = e), do: e
+  # Side effect lists are already flat
+  def flatten_effect({:s, _list} = e), do: e
+  # Dependent effect lists are already flat
+  def flatten_effect({:d, _list} = e), do: e
 
   def flatten_effect({:effect_row, label, tail}) do
     {:effect_row, label, flatten_effect(tail)}
@@ -161,6 +223,7 @@ defmodule Litmus.Types.Effects do
   """
   def from_list([]), do: {:effect_empty}
   def from_list([label]), do: {:effect_label, label}
+
   def from_list([label | rest]) do
     {:effect_row, label, from_list(rest)}
   end
@@ -169,25 +232,40 @@ defmodule Litmus.Types.Effects do
   Converts an effect row to a list of labels.
 
   Returns :unknown for variables or unknown effects.
+  Side effects and dependent effects are returned as {:s, mfa_list} and {:d, mfa_list}.
 
   ## Examples
 
       iex> alias Litmus.Types.Effects
-      iex> Effects.to_list({:effect_row, :io, {:effect_label, :exn}})
-      [:io, :exn]
+      iex> Effects.to_list({:effect_row, :exn, {:effect_label, :lambda}})
+      [:exn, :lambda]
 
       iex> alias Litmus.Types.Effects
       iex> Effects.to_list({:effect_var, :e})
       :unknown
+
+      iex> alias Litmus.Types.Effects
+      iex> Effects.to_list({:s, ["File.read/1", "IO.puts/1"]})
+      [{:s, ["File.read/1", "IO.puts/1"]}]
+
+      iex> alias Litmus.Types.Effects
+      iex> Effects.to_list({:d, ["System.get_env/1"]})
+      [{:d, ["System.get_env/1"]}]
   """
   def to_list({:effect_empty}), do: []
   def to_list({:effect_label, label}), do: [label]
+  # Return side effects as a single element
+  def to_list({:s, _list} = s), do: [s]
+  # Return dependent effects as a single element
+  def to_list({:d, _list} = d), do: [d]
+
   def to_list({:effect_row, label, tail}) do
     case to_list(tail) do
       :unknown -> :unknown
       list -> [label | list]
     end
   end
+
   def to_list(_), do: :unknown
 
   @doc """
@@ -198,84 +276,91 @@ defmodule Litmus.Types.Effects do
   def simplify({:effect_row, label, {:effect_empty}}) do
     {:effect_label, label}
   end
+
   def simplify(effect), do: effect
 
   @doc """
   Creates an effect from an MFA based on the effect registry.
 
   Maps from compact PURITY effect types to the internal effect representation.
+  Side effects and dependent effects are now tracked with specific function names.
+
+  If the MFA has a resolution mapping to leaf BIFs, those leaf BIFs are used instead.
   """
-  def from_mfa({module, function, arity} = mfa) do
-    effect_type = Litmus.Effects.Registry.effect_type(mfa)
+  def from_mfa({_module, _function, _arity} = mfa) do
+    alias Litmus.Types.Effects.Layers
+
+    # First, check if this MFA has a direct effect type in the registry
+    direct_effect = Litmus.Effects.Registry.effect_type(mfa)
+
+    # If it has a direct effect, use that instead of resolving
+    # (Resolution is only for understanding implementation details, not for effect determination)
+    {actual_mfas, effect_type} =
+      if direct_effect != nil do
+        # Has direct effect - use it
+        {[mfa], direct_effect}
+      else
+        # No direct effect - try resolution as fallback
+        case Litmus.Effects.Registry.resolve_to_leaves(mfa) do
+          {:ok, leaves} ->
+            # This is a wrapper function - combine effects from all leaves
+            # Take the most impure effect using Layers.combine_all
+            leaf_effects = Enum.map(leaves, &Litmus.Effects.Registry.effect_type/1)
+            leaf_effect = Layers.combine_all(leaf_effects)
+            {leaves, leaf_effect}
+
+          :not_found ->
+            # No resolution and no direct effect - unknown
+            {[mfa], :u}
+        end
+      end
 
     case effect_type do
       # Pure function - no effects
       :p -> {:effect_empty}
-
-      # Dependent - reads from execution environment
-      :d -> {:effect_label, :dependent}
-
+      # Dependent - reads from execution environment, track specific function(s)
+      :d -> {:d, Enum.map(actual_mfas, fn {m, f, a} -> format_mfa(m, f, a) end)}
+      # Dependent - tuple format from runtime cache (already has function names)
+      {:d, list} when is_list(list) -> {:d, list}
       # Lambda - effects depend on passed lambdas
       :l -> {:effect_label, :lambda}
-
       # Exception - can raise (atom format from JSON)
       :exn -> {:effect_label, :exn}
-
+      # Exception - can raise (simple :e atom from registry)
+      :e -> {:effect_label, :exn}
       # Exception - can raise (tuple format from runtime cache)
       {:e, _types} -> {:effect_label, :exn}
-
-      # Side effects - map to generic state effect since we don't distinguish fine-grained categories
-      :s -> determine_specific_effect(module, function, arity)
-
+      # Side effects - track specific function MFA(s)
+      :s -> {:s, Enum.map(actual_mfas, fn {m, f, a} -> format_mfa(m, f, a) end)}
+      # Side effects - tuple format from runtime cache (already has function names)
+      {:s, list} when is_list(list) -> {:s, list}
       # NIF - native implemented function
       :n -> {:effect_label, :nif}
-
       # Unknown (atom) or not in registry
       :u -> {:effect_unknown}
-
       # Unknown or not in registry
       _ -> {:effect_unknown}
     end
   end
 
-  # Helper to determine specific effect type from module/function
-  # This provides fine-grained effects for better analysis
-  defp determine_specific_effect(module, function, _arity) do
-    case {module, function} do
-      # Kernel process operations
-      {Kernel, fun} when fun in [:send, :spawn, :spawn_link, :spawn_monitor, :apply] ->
-        {:effect_label, :process}
+  # Helper to format an MFA as a string
+  defp format_mfa(module, function, arity) do
+    # For Elixir modules, use the short name (e.g., File instead of Elixir.File)
+    module_str =
+      case module do
+        mod when is_atom(mod) ->
+          mod_str = Atom.to_string(mod)
 
-      # Module-based categorization
-      {File, _} -> {:effect_label, :file}
-      {IO, _} -> {:effect_label, :io}
-      {Logger, _} -> {:effect_label, :io}
-      {Process, _} -> {:effect_label, :process}
-      {Port, _} -> {:effect_label, :process}
-      {Agent, _} -> {:effect_label, :process}
-      {Task, _} -> {:effect_label, :process}
-      {GenServer, _} -> {:effect_label, :process}
-      {Supervisor, _} -> {:effect_label, :process}
-      {System, _} -> {:effect_label, :state}
-      {Application, _} -> {:effect_label, :state}
-      {Code, _} -> {:effect_label, :state}
+          case mod_str do
+            "Elixir." <> rest -> rest
+            _ -> mod_str
+          end
 
-      # Erlang modules
-      {mod, _} when mod in [:gen_tcp, :gen_udp, :inet, :ssl] ->
-        {:effect_label, :network}
+        _ ->
+          inspect(module)
+      end
 
-      {mod, _} when mod in [:ets, :dets] ->
-        {:effect_label, :ets}
-
-      {mod, _} when mod in [:rand, :random] ->
-        {:effect_label, :random}
-
-      {mod, _} when mod == :os or mod == :erlang ->
-        {:effect_label, :state}
-
-      # Default: generic state effect
-      _ -> {:effect_label, :state}
-    end
+    "#{module_str}.#{function}/#{arity}"
   end
 
   @doc """
@@ -286,19 +371,39 @@ defmodule Litmus.Types.Effects do
   def subeffect?({:effect_empty}, _), do: true
   def subeffect?(_, {:effect_empty}), do: false
   def subeffect?({:effect_label, l1}, {:effect_label, l2}), do: l1 == l2
+
+  def subeffect?({:s, list1}, {:s, list2}) do
+    # All effects in list1 must be in list2
+    Enum.all?(list1, &(&1 in list2))
+  end
+
+  def subeffect?({:d, list1}, {:d, list2}) do
+    # All effects in list1 must be in list2
+    Enum.all?(list1, &(&1 in list2))
+  end
+
   def subeffect?({:effect_label, l}, {:effect_row, l2, tail}) do
     l == l2 or subeffect?({:effect_label, l}, tail)
   end
+
   def subeffect?({:effect_row, l, t1}, effect2) do
     has_effect?(l, effect2) and subeffect?(t1, remove_first(l, effect2))
   end
-  def subeffect?(_, {:effect_unknown}), do: true  # Unknown accepts everything
-  def subeffect?({:effect_unknown}, _), do: false  # But isn't a subeffect of specific effects
-  def subeffect?(_, _), do: :unknown  # Can't determine for variables
+
+  # Unknown accepts everything
+  def subeffect?(_, {:effect_unknown}), do: true
+  # But isn't a subeffect of specific effects
+  def subeffect?({:effect_unknown}, _), do: false
+  # Can't determine for variables
+  def subeffect?(_, _), do: :unknown
 
   # Helper to extract a label from an effect (for error messages)
   defp extract_label({:effect_label, l}), do: l
   defp extract_label({:effect_row, l, _}), do: l
+  # Return the whole side effect for rows
+  defp extract_label({:s, list}), do: {:s, list}
+  # Return the whole dependent effect for rows
+  defp extract_label({:d, list}), do: {:d, list}
   defp extract_label(_), do: :unknown
 
   # Helper to remove first occurrence of a label

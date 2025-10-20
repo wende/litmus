@@ -112,22 +112,28 @@ defmodule Litmus.Effects do
   # effect do ... catch ... rescue ... end
   defmacro effect(do: code_block, catch: catch_clauses, rescue: rescue_clauses)
            when is_list(catch_clauses) and is_list(rescue_clauses) do
-    build_effect_with_handler_and_rescue(code_block, catch_clauses, rescue_clauses, [])
+    build_effect_with_handler_and_rescue(
+      code_block,
+      catch_clauses,
+      rescue_clauses,
+      [],
+      __CALLER__
+    )
   end
 
   # effect do ... catch ... end
   defmacro effect(do: code_block, catch: catch_clauses) when is_list(catch_clauses) do
-    build_effect_with_handler(code_block, catch_clauses, [])
+    build_effect_with_handler(code_block, catch_clauses, [], __CALLER__)
   end
 
   # effect do ... catch: handler_fn
   defmacro effect(do: code_block, catch: handler_fn) do
-    build_effect_with_external_handler(code_block, handler_fn, [])
+    build_effect_with_external_handler(code_block, handler_fn, [], __CALLER__)
   end
 
   # Legacy support: effect do ... end (returns function)
   defmacro effect(do: block) do
-    build_effect_function(block, [])
+    build_effect_function(block, [], __CALLER__)
   end
 
   # effect/2 clauses - two argument forms with options
@@ -135,30 +141,39 @@ defmodule Litmus.Effects do
   # effect track: [:file] do ... catch ... rescue ... end
   defmacro effect(opts, do: code_block, catch: catch_clauses, rescue: rescue_clauses)
            when is_list(catch_clauses) and is_list(rescue_clauses) do
-    build_effect_with_handler_and_rescue(code_block, catch_clauses, rescue_clauses, opts)
+    build_effect_with_handler_and_rescue(
+      code_block,
+      catch_clauses,
+      rescue_clauses,
+      opts,
+      __CALLER__
+    )
   end
 
   # effect track: [:file] do ... catch ... end
   defmacro effect(opts, do: code_block, catch: catch_clauses) when is_list(catch_clauses) do
-    build_effect_with_handler(code_block, catch_clauses, opts)
+    build_effect_with_handler(code_block, catch_clauses, opts, __CALLER__)
   end
 
   # effect track: [:file] do ... catch: handler_fn
   defmacro effect(opts, do: code_block, catch: handler_fn) do
-    build_effect_with_external_handler(code_block, handler_fn, opts)
+    build_effect_with_external_handler(code_block, handler_fn, opts, __CALLER__)
   end
 
   # Legacy support: effect track: [:file] do ... end (returns function)
   defmacro effect(opts, do: block) when is_list(opts) do
-    build_effect_function(block, opts)
+    build_effect_function(block, opts, __CALLER__)
   end
 
   # Build effect with inline catch clauses
-  defp build_effect_with_handler(code_block, catch_clauses, opts) do
+  defp build_effect_with_handler(code_block, catch_clauses, opts, caller) do
     opts = Keyword.validate!(opts, track: :all, passthrough: false)
 
+    # Expand all macros in the code block FIRST
+    expanded_block = expand_all_macros(code_block, caller)
+
     # Transform the code block to CPS
-    transformed = Transformer.transform_block(code_block, opts)
+    transformed = Transformer.transform_block(expanded_block, opts)
 
     # Generate handler function from catch clauses that handles continuations
     handler_fn =
@@ -192,11 +207,20 @@ defmodule Litmus.Effects do
   end
 
   # Build effect with inline catch clauses AND rescue clauses
-  defp build_effect_with_handler_and_rescue(code_block, catch_clauses, rescue_clauses, opts) do
+  defp build_effect_with_handler_and_rescue(
+         code_block,
+         catch_clauses,
+         rescue_clauses,
+         opts,
+         caller
+       ) do
     opts = Keyword.validate!(opts, track: :all, passthrough: false)
 
+    # Expand all macros in the code block FIRST
+    expanded_block = expand_all_macros(code_block, caller)
+
     # Transform the code block to CPS
-    transformed = Transformer.transform_block(code_block, opts)
+    transformed = Transformer.transform_block(expanded_block, opts)
 
     # Generate handler function from catch clauses that handles continuations AND exceptions
     handler_fn =
@@ -234,11 +258,14 @@ defmodule Litmus.Effects do
   end
 
   # Build effect with external handler function
-  defp build_effect_with_external_handler(code_block, handler_fn, opts) do
+  defp build_effect_with_external_handler(code_block, handler_fn, opts, caller) do
     opts = Keyword.validate!(opts, track: :all, passthrough: false)
 
+    # Expand all macros in the code block FIRST
+    expanded_block = expand_all_macros(code_block, caller)
+
     # Transform the code block to CPS
-    transformed = Transformer.transform_block(code_block, opts)
+    transformed = Transformer.transform_block(expanded_block, opts)
 
     # Wrap the user's handler to handle continuations
     # User handlers take 1 arg (effect sig), we need to wrap them to take 2 args (effect sig, cont)
@@ -271,11 +298,14 @@ defmodule Litmus.Effects do
   end
 
   # Build effect function (legacy API)
-  defp build_effect_function(block, opts) do
+  defp build_effect_function(block, opts, caller) do
     opts = Keyword.validate!(opts, track: :all, passthrough: false)
 
+    # Expand all macros in the code block FIRST
+    expanded_block = expand_all_macros(block, caller)
+
     # Transform the block to CPS at compile time
-    transformed = Transformer.transform_block(block, opts)
+    transformed = Transformer.transform_block(expanded_block, opts)
 
     # Replace __handler__ variable with the actual parameter
     handler_var = quote do: var!(___handler___, Litmus.Effects)
@@ -399,5 +429,12 @@ defmodule Litmus.Effects do
         FunctionClauseError -> handler2.(effect_sig)
       end
     end
+  end
+
+  # Expand all macros in an AST using the caller's environment
+  defp expand_all_macros(ast, caller) do
+    Macro.prewalk(ast, fn node ->
+      Macro.expand(node, caller)
+    end)
   end
 end

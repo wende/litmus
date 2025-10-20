@@ -31,7 +31,7 @@ defmodule Litmus.Types.UnificationTest do
       assert {:ok, subst} = Unification.unify(var1, var2)
       # One should be substituted for the other
       assert Substitution.apply_subst(subst, var1) == var2 or
-             Substitution.apply_subst(subst, var2) == var1
+               Substitution.apply_subst(subst, var2) == var1
     end
   end
 
@@ -185,8 +185,14 @@ defmodule Litmus.Types.UnificationTest do
 
   describe "forall type unification" do
     test "unifies forall types with same structure (alpha-equivalence)" do
-      forall1 = {:forall, [{:type_var, :a}], {:function, {:type_var, :a}, {:effect_empty}, {:type_var, :a}}}
-      forall2 = {:forall, [{:type_var, :b}], {:function, {:type_var, :b}, {:effect_empty}, {:type_var, :b}}}
+      forall1 =
+        {:forall, [{:type_var, :a}],
+         {:function, {:type_var, :a}, {:effect_empty}, {:type_var, :a}}}
+
+      forall2 =
+        {:forall, [{:type_var, :b}],
+         {:function, {:type_var, :b}, {:effect_empty}, {:type_var, :b}}}
+
       assert {:ok, _subst} = Unification.unify(forall1, forall2)
     end
 
@@ -206,37 +212,49 @@ defmodule Litmus.Types.UnificationTest do
 
     test "unifies forall types with effect variables (tests effect var renaming)" do
       # forall e. int ->{e} string  vs  forall eff. int ->{eff} string
-      forall1 = {:forall, [{:effect_var, :e}],
-                 {:function, :int, {:effect_var, :e}, :string}}
-      forall2 = {:forall, [{:effect_var, :eff}],
-                 {:function, :int, {:effect_var, :eff}, :string}}
+      forall1 = {:forall, [{:effect_var, :e}], {:function, :int, {:effect_var, :e}, :string}}
+      forall2 = {:forall, [{:effect_var, :eff}], {:function, :int, {:effect_var, :eff}, :string}}
       assert {:ok, _subst} = Unification.unify(forall1, forall2)
     end
 
     test "unifies forall types with effect rows (tests renaming in effect rows)" do
       # forall e. int ->{io | e} string  vs  forall f. int ->{io | f} string
-      forall1 = {:forall, [{:effect_var, :e}],
-                 {:function, :int, {:effect_row, :io, {:effect_var, :e}}, :string}}
-      forall2 = {:forall, [{:effect_var, :f}],
-                 {:function, :int, {:effect_row, :io, {:effect_var, :f}}, :string}}
+      forall1 =
+        {:forall, [{:effect_var, :e}],
+         {:function, :int, {:effect_row, :io, {:effect_var, :e}}, :string}}
+
+      forall2 =
+        {:forall, [{:effect_var, :f}],
+         {:function, :int, {:effect_row, :io, {:effect_var, :f}}, :string}}
+
       assert {:ok, _subst} = Unification.unify(forall1, forall2)
     end
 
     test "unifies forall types with multiple variables" do
       # forall a, b. (a, b)  vs  forall x, y. (x, y)
-      forall1 = {:forall, [{:type_var, :a}, {:type_var, :b}],
-                 {:tuple, [{:type_var, :a}, {:type_var, :b}]}}
-      forall2 = {:forall, [{:type_var, :x}, {:type_var, :y}],
-                 {:tuple, [{:type_var, :x}, {:type_var, :y}]}}
+      forall1 =
+        {:forall, [{:type_var, :a}, {:type_var, :b}],
+         {:tuple, [{:type_var, :a}, {:type_var, :b}]}}
+
+      forall2 =
+        {:forall, [{:type_var, :x}, {:type_var, :y}],
+         {:tuple, [{:type_var, :x}, {:type_var, :y}]}}
+
       assert {:ok, _subst} = Unification.unify(forall1, forall2)
     end
 
     test "unifies forall types with nested foralls (tests forall in renaming)" do
       # forall a. (forall b. b -> a)  vs  forall x. (forall y. y -> x)
-      inner1 = {:forall, [{:type_var, :b}], {:function, {:type_var, :b}, {:effect_empty}, {:type_var, :a}}}
+      inner1 =
+        {:forall, [{:type_var, :b}],
+         {:function, {:type_var, :b}, {:effect_empty}, {:type_var, :a}}}
+
       forall1 = {:forall, [{:type_var, :a}], inner1}
 
-      inner2 = {:forall, [{:type_var, :y}], {:function, {:type_var, :y}, {:effect_empty}, {:type_var, :x}}}
+      inner2 =
+        {:forall, [{:type_var, :y}],
+         {:function, {:type_var, :y}, {:effect_empty}, {:type_var, :x}}}
+
       forall2 = {:forall, [{:type_var, :x}], inner2}
 
       assert {:ok, _subst} = Unification.unify(forall1, forall2)
@@ -244,14 +262,25 @@ defmodule Litmus.Types.UnificationTest do
 
     test "fails to unify forall types with different number of variables" do
       forall1 = {:forall, [{:type_var, :a}], {:type_var, :a}}
-      forall2 = {:forall, [{:type_var, :a}, {:type_var, :b}], {:tuple, [{:type_var, :a}, {:type_var, :b}]}}
+
+      forall2 =
+        {:forall, [{:type_var, :a}, {:type_var, :b}],
+         {:tuple, [{:type_var, :a}, {:type_var, :b}]}}
+
       assert {:error, _} = Unification.unify(forall1, forall2)
     end
 
     test "fails to unify forall types with incompatible bodies" do
       # forall a. a -> a  vs  forall b. b -> b -> b
-      forall1 = {:forall, [{:type_var, :a}], {:function, {:type_var, :a}, {:effect_empty}, {:type_var, :a}}}
-      forall2 = {:forall, [{:type_var, :b}], {:function, {:type_var, :b}, {:effect_empty}, {:function, {:type_var, :b}, {:effect_empty}, {:type_var, :b}}}}
+      forall1 =
+        {:forall, [{:type_var, :a}],
+         {:function, {:type_var, :a}, {:effect_empty}, {:type_var, :a}}}
+
+      forall2 =
+        {:forall, [{:type_var, :b}],
+         {:function, {:type_var, :b}, {:effect_empty},
+          {:function, {:type_var, :b}, {:effect_empty}, {:type_var, :b}}}}
+
       assert {:error, _} = Unification.unify(forall1, forall2)
     end
   end
@@ -290,8 +319,9 @@ defmodule Litmus.Types.UnificationTest do
 
     test "fails to unify non-empty row with empty effect" do
       row = {:effect_row, :io, {:effect_empty}}
+
       assert {:error, {:cannot_unify_non_empty_with_empty, _, _}} =
-        Unification.unify_effect(row, {:effect_empty})
+               Unification.unify_effect(row, {:effect_empty})
     end
   end
 
@@ -441,7 +471,9 @@ defmodule Litmus.Types.UnificationTest do
     test "prevents infinite effect type" do
       var = {:effect_var, :e}
       infinite_effect = {:effect_row, :io, var}
-      assert {:error, {:occurs_check_failed, _, _}} = Unification.unify_effect(var, infinite_effect)
+
+      assert {:error, {:occurs_check_failed, _, _}} =
+               Unification.unify_effect(var, infinite_effect)
     end
   end
 

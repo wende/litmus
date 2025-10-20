@@ -48,7 +48,8 @@ defmodule Litmus do
 
   # All 7 purity levels: :pure (p), :exceptions (e), :dependent (d), :lambda_dependent (l),
   # :nif (n), :side_effects (s), :unknown (u)
-  @type purity_level :: :pure | :exceptions | :dependent | :lambda_dependent | :nif | :side_effects | :unknown
+  @type purity_level ::
+          :pure | :exceptions | :dependent | :lambda_dependent | :nif | :side_effects | :unknown
   @type purity_result :: %{
           mfa() => purity_level(),
           dependencies: list()
@@ -715,13 +716,20 @@ defmodule Litmus do
   # Note: :lambda_dependent is determined by effect inference, not by PURITY analysis
   defp elixirify_purity({purity, _deps}) do
     case purity do
-      :p -> :pure                     # Pure (p)
-      :e -> :exceptions               # Exceptions (e)
-      :d -> :dependent                # Dependent (d)
-      :n -> :nif                      # NIF (n)
-      :s -> :side_effects             # Side effects (s)
-      {:at_least, _} -> :unknown      # Unknown (conservative estimate)
-      _ -> :unknown                   # Default: unknown (u)
+      # Pure (p)
+      :p -> :pure
+      # Exceptions (e)
+      :e -> :exceptions
+      # Dependent (d)
+      :d -> :dependent
+      # NIF (n)
+      :n -> :nif
+      # Side effects (s)
+      :s -> :side_effects
+      # Unknown (conservative estimate)
+      {:at_least, _} -> :unknown
+      # Default: unknown (u)
+      _ -> :unknown
     end
   end
 
@@ -738,14 +746,22 @@ defmodule Litmus do
   defp erlify_purity(purity) do
     erl_atom =
       case purity do
-        :pure -> :p                         # Pure (p)
-        :exceptions -> :e                   # Exceptions (e)
-        :dependent -> :d                    # Dependent (d)
-        :lambda_dependent -> :d             # Lambda-dependent (l) - treat as dependent for PURITY
-        :nif -> :n                          # NIF (n)
-        :side_effects -> :s                 # Side effects (s)
-        :unknown -> {:at_least, :s}         # Unknown (u) - conservative: assume side effects
-        _ -> {:at_least, :s}                # Default: unknown
+        # Pure (p)
+        :pure -> :p
+        # Exceptions (e)
+        :exceptions -> :e
+        # Dependent (d)
+        :dependent -> :d
+        # Lambda-dependent (l) - treat as dependent for PURITY
+        :lambda_dependent -> :d
+        # NIF (n)
+        :nif -> :n
+        # Side effects (s)
+        :side_effects -> :s
+        # Unknown (u) - conservative: assume side effects
+        :unknown -> {:at_least, :s}
+        # Default: unknown
+        _ -> {:at_least, :s}
       end
 
     {erl_atom, []}

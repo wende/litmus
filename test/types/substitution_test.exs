@@ -29,17 +29,21 @@ defmodule Litmus.Types.SubstitutionTest do
         {:type_var, :k2} => :string
       }
 
-      map_type = {:map, [
-        {{:type_var, :k1}, {:type_var, :v1}},
-        {{:type_var, :k2}, :bool}
-      ]}
+      map_type =
+        {:map,
+         [
+           {{:type_var, :k1}, {:type_var, :v1}},
+           {{:type_var, :k2}, :bool}
+         ]}
 
       result = Substitution.apply_subst(subst, map_type)
 
-      assert result == {:map, [
-        {:atom, {:list, :int}},
-        {:string, :bool}
-      ]}
+      assert result ==
+               {:map,
+                [
+                  {:atom, {:list, :int}},
+                  {:string, :bool}
+                ]}
     end
 
     test "applies substitution to complex nested unions" do
@@ -48,19 +52,23 @@ defmodule Litmus.Types.SubstitutionTest do
         {:type_var, :b} => {:list, :string}
       }
 
-      union_type = {:union, [
-        {:type_var, :a},
-        {:tuple, [{:type_var, :b}, :bool]},
-        {:type_var, :b}
-      ]}
+      union_type =
+        {:union,
+         [
+           {:type_var, :a},
+           {:tuple, [{:type_var, :b}, :bool]},
+           {:type_var, :b}
+         ]}
 
       result = Substitution.apply_subst(subst, union_type)
 
-      assert result == {:union, [
-        :int,
-        {:tuple, [{:list, :string}, :bool]},
-        {:list, :string}
-      ]}
+      assert result ==
+               {:union,
+                [
+                  :int,
+                  {:tuple, [{:list, :string}, :bool]},
+                  {:list, :string}
+                ]}
     end
   end
 
@@ -89,10 +97,10 @@ defmodule Litmus.Types.SubstitutionTest do
       result = Substitution.apply_to_env(subst, env)
 
       assert result == %{
-        x: :int,
-        y: {:list, :string},
-        z: :bool
-      }
+               x: :int,
+               y: {:list, :string},
+               z: :bool
+             }
     end
 
     test "returns environment unchanged when substitution is empty" do
@@ -117,8 +125,8 @@ defmodule Litmus.Types.SubstitutionTest do
       result = Substitution.apply_to_env(subst, env)
 
       assert result == %{
-        f: {:function, :int, {:effect_label, :io}, :string}
-      }
+               f: {:function, :int, {:effect_label, :io}, :string}
+             }
     end
   end
 
@@ -134,9 +142,9 @@ defmodule Litmus.Types.SubstitutionTest do
       result = Substitution.restrict(subst, vars)
 
       assert result == %{
-        {:type_var, :a} => :int,
-        {:type_var, :c} => :bool
-      }
+               {:type_var, :a} => :int,
+               {:type_var, :c} => :bool
+             }
     end
 
     test "restrict returns empty when no variables match" do
@@ -159,9 +167,9 @@ defmodule Litmus.Types.SubstitutionTest do
       result = Substitution.remove(subst, vars)
 
       assert result == %{
-        {:type_var, :a} => :int,
-        {:type_var, :c} => :bool
-      }
+               {:type_var, :a} => :int,
+               {:type_var, :c} => :bool
+             }
     end
 
     test "remove returns original substitution when no variables match" do
@@ -184,11 +192,14 @@ defmodule Litmus.Types.SubstitutionTest do
 
       domain = Substitution.domain(subst)
 
-      assert MapSet.equal?(domain, MapSet.new([
-        {:type_var, :a},
-        {:type_var, :b},
-        {:effect_var, :e}
-      ]))
+      assert MapSet.equal?(
+               domain,
+               MapSet.new([
+                 {:type_var, :a},
+                 {:type_var, :b},
+                 {:effect_var, :e}
+               ])
+             )
     end
 
     test "range_vars returns all free variables in the range" do
@@ -199,10 +210,13 @@ defmodule Litmus.Types.SubstitutionTest do
 
       range_vars = Substitution.range_vars(subst)
 
-      assert MapSet.equal?(range_vars, MapSet.new([
-        {:type_var, :b},
-        {:type_var, :d}
-      ]))
+      assert MapSet.equal?(
+               range_vars,
+               MapSet.new([
+                 {:type_var, :b},
+                 {:type_var, :d}
+               ])
+             )
     end
 
     test "range_vars returns empty set for concrete types" do
@@ -262,10 +276,10 @@ defmodule Litmus.Types.SubstitutionTest do
 
       # Should resolve to: a -> Int, b -> Int, c -> Int
       assert result == %{
-        {:type_var, :a} => :int,
-        {:type_var, :b} => :int,
-        {:type_var, :c} => :int
-      }
+               {:type_var, :a} => :int,
+               {:type_var, :b} => :int,
+               {:type_var, :c} => :int
+             }
 
       assert Substitution.idempotent?(result)
     end
@@ -292,10 +306,10 @@ defmodule Litmus.Types.SubstitutionTest do
       result = Substitution.make_idempotent(subst)
 
       assert result == %{
-        {:type_var, :a} => {:list, :int},
-        {:type_var, :b} => :int,
-        {:type_var, :c} => :int
-      }
+               {:type_var, :a} => {:list, :int},
+               {:type_var, :b} => :int,
+               {:type_var, :c} => :int
+             }
     end
   end
 
@@ -345,8 +359,9 @@ defmodule Litmus.Types.SubstitutionTest do
       # We want: ∀a. a -> a
       # Start with: a -> b, then unify to get b = a
 
-      subst = Substitution.empty()
-      |> Substitution.add({:type_var, :b}, {:type_var, :a})
+      subst =
+        Substitution.empty()
+        |> Substitution.add({:type_var, :b}, {:type_var, :a})
 
       function_type = {:function, {:type_var, :a}, {:effect_empty}, {:type_var, :b}}
       result = Substitution.apply_subst(subst, function_type)
@@ -386,9 +401,9 @@ defmodule Litmus.Types.SubstitutionTest do
       result = Substitution.apply_to_env(subst, env)
 
       assert result == %{
-        x: :int,
-        y: {:list, :string}
-      }
+               x: :int,
+               y: {:list, :string}
+             }
     end
 
     test "handling forall types with bound variables" do
@@ -397,14 +412,14 @@ defmodule Litmus.Types.SubstitutionTest do
 
       subst = %{{:type_var, :a} => :string}
 
-      forall_type = {:forall, [{:type_var, :a}],
-                     {:function, {:type_var, :a}, {:effect_empty}, :int}}
+      forall_type =
+        {:forall, [{:type_var, :a}], {:function, {:type_var, :a}, {:effect_empty}, :int}}
 
       result = Substitution.apply_subst(subst, forall_type)
 
       # The inner 'a' should remain unchanged (it's bound)
-      assert result == {:forall, [{:type_var, :a}],
-                        {:function, {:type_var, :a}, {:effect_empty}, :int}}
+      assert result ==
+               {:forall, [{:type_var, :a}], {:function, {:type_var, :a}, {:effect_empty}, :int}}
     end
   end
 end

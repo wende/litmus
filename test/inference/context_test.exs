@@ -13,10 +13,11 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "exit_scope decreases scope level" do
-      ctx = Context.empty()
-      |> Context.enter_scope()
-      |> Context.enter_scope()
-      |> Context.exit_scope()
+      ctx =
+        Context.empty()
+        |> Context.enter_scope()
+        |> Context.enter_scope()
+        |> Context.exit_scope()
 
       assert ctx.scope_level == 1
     end
@@ -30,28 +31,36 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "nested scopes track properly" do
-      ctx = Context.empty()
-      |> Context.enter_scope()  # level 1
-      |> Context.enter_scope()  # level 2
-      |> Context.enter_scope()  # level 3
+      ctx =
+        Context.empty()
+        # level 1
+        |> Context.enter_scope()
+        # level 2
+        |> Context.enter_scope()
+        # level 3
+        |> Context.enter_scope()
 
       assert ctx.scope_level == 3
 
-      ctx = Context.exit_scope(ctx)  # level 2
+      # level 2
+      ctx = Context.exit_scope(ctx)
       assert ctx.scope_level == 2
 
-      ctx = Context.exit_scope(ctx)  # level 1
+      # level 1
+      ctx = Context.exit_scope(ctx)
       assert ctx.scope_level == 1
 
-      ctx = Context.exit_scope(ctx)  # level 0
+      # level 0
+      ctx = Context.exit_scope(ctx)
       assert ctx.scope_level == 0
     end
   end
 
   describe "effect management" do
     test "add_effect adds effect to context" do
-      ctx = Context.empty()
-      |> Context.add_effect({:effect_label, :io})
+      ctx =
+        Context.empty()
+        |> Context.add_effect({:effect_label, :io})
 
       effects = Context.get_effects(ctx)
 
@@ -59,19 +68,20 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "multiple effects accumulate in order" do
-      ctx = Context.empty()
-      |> Context.add_effect({:effect_label, :io})
-      |> Context.add_effect({:effect_label, :exn})
-      |> Context.add_effect({:effect_label, :file})
+      ctx =
+        Context.empty()
+        |> Context.add_effect({:effect_label, :io})
+        |> Context.add_effect({:effect_label, :exn})
+        |> Context.add_effect({:effect_label, :file})
 
       effects = Context.get_effects(ctx)
 
       # Effects are added to the front, so they appear in reverse order
       assert effects == [
-        {:effect_label, :file},
-        {:effect_label, :exn},
-        {:effect_label, :io}
-      ]
+               {:effect_label, :file},
+               {:effect_label, :exn},
+               {:effect_label, :io}
+             ]
     end
 
     test "get_effects returns empty list for new context" do
@@ -84,12 +94,14 @@ defmodule Litmus.Inference.ContextTest do
 
   describe "merge/2" do
     test "merges bindings from two contexts" do
-      ctx1 = Context.empty()
-      |> Context.add(:x, :int)
-      |> Context.add(:y, :string)
+      ctx1 =
+        Context.empty()
+        |> Context.add(:x, :int)
+        |> Context.add(:y, :string)
 
-      ctx2 = Context.empty()
-      |> Context.add(:z, :bool)
+      ctx2 =
+        Context.empty()
+        |> Context.add(:z, :bool)
 
       merged = Context.merge(ctx1, ctx2)
 
@@ -99,11 +111,13 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "second context bindings override first" do
-      ctx1 = Context.empty()
-      |> Context.add(:x, :int)
+      ctx1 =
+        Context.empty()
+        |> Context.add(:x, :int)
 
-      ctx2 = Context.empty()
-      |> Context.add(:x, :string)
+      ctx2 =
+        Context.empty()
+        |> Context.add(:x, :string)
 
       merged = Context.merge(ctx1, ctx2)
 
@@ -111,11 +125,13 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "merges effects from both contexts" do
-      ctx1 = Context.empty()
-      |> Context.add_effect({:effect_label, :io})
+      ctx1 =
+        Context.empty()
+        |> Context.add_effect({:effect_label, :io})
 
-      ctx2 = Context.empty()
-      |> Context.add_effect({:effect_label, :exn})
+      ctx2 =
+        Context.empty()
+        |> Context.add_effect({:effect_label, :exn})
 
       merged = Context.merge(ctx1, ctx2)
       effects = Context.get_effects(merged)
@@ -125,12 +141,14 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "takes maximum scope level" do
-      ctx1 = Context.empty()
-      |> Context.enter_scope()
-      |> Context.enter_scope()
+      ctx1 =
+        Context.empty()
+        |> Context.enter_scope()
+        |> Context.enter_scope()
 
-      ctx2 = Context.empty()
-      |> Context.enter_scope()
+      ctx2 =
+        Context.empty()
+        |> Context.enter_scope()
 
       merged = Context.merge(ctx1, ctx2)
 
@@ -140,9 +158,10 @@ defmodule Litmus.Inference.ContextTest do
 
   describe "free_variables/1" do
     test "returns empty set for context with no variables" do
-      ctx = Context.empty()
-      |> Context.add(:x, :int)
-      |> Context.add(:y, :string)
+      ctx =
+        Context.empty()
+        |> Context.add(:x, :int)
+        |> Context.add(:y, :string)
 
       vars = Context.free_variables(ctx)
 
@@ -150,9 +169,10 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "finds free type variables in bindings" do
-      ctx = Context.empty()
-      |> Context.add(:x, {:type_var, :a})
-      |> Context.add(:y, {:list, {:type_var, :b}})
+      ctx =
+        Context.empty()
+        |> Context.add(:x, {:type_var, :a})
+        |> Context.add(:y, {:list, {:type_var, :b}})
 
       vars = Context.free_variables(ctx)
 
@@ -161,8 +181,9 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "finds free variables in function types" do
-      ctx = Context.empty()
-      |> Context.add(:f, {:function, {:type_var, :a}, {:effect_var, :e}, {:type_var, :b}})
+      ctx =
+        Context.empty()
+        |> Context.add(:f, {:function, {:type_var, :a}, {:effect_var, :e}, {:type_var, :b}})
 
       vars = Context.free_variables(ctx)
 
@@ -174,8 +195,9 @@ defmodule Litmus.Inference.ContextTest do
 
   describe "has_binding?/2 and remove/2" do
     test "has_binding? returns true for existing binding" do
-      ctx = Context.empty()
-      |> Context.add(:x, :int)
+      ctx =
+        Context.empty()
+        |> Context.add(:x, :int)
 
       assert Context.has_binding?(ctx, :x)
     end
@@ -187,9 +209,10 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "remove removes binding from context" do
-      ctx = Context.empty()
-      |> Context.add(:x, :int)
-      |> Context.add(:y, :string)
+      ctx =
+        Context.empty()
+        |> Context.add(:x, :int)
+        |> Context.add(:y, :string)
 
       ctx = Context.remove(ctx, :x)
 
@@ -198,8 +221,9 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "remove on non-existent binding is safe" do
-      ctx = Context.empty()
-      |> Context.add(:x, :int)
+      ctx =
+        Context.empty()
+        |> Context.add(:x, :int)
 
       result = Context.remove(ctx, :y)
 
@@ -252,13 +276,16 @@ defmodule Litmus.Inference.ContextTest do
 
       # hd and tl can raise exceptions
       {:ok, hd_type} = Context.lookup(ctx, :hd)
+
       assert {:forall, [{:type_var, :a}],
-               {:function, {:list, {:type_var, :a}}, {:effect_label, :exn}, {:type_var, :a}}} = hd_type
+              {:function, {:list, {:type_var, :a}}, {:effect_label, :exn}, {:type_var, :a}}} =
+               hd_type
 
       # length is pure
       {:ok, length_type} = Context.lookup(ctx, :length)
+
       assert {:forall, [{:type_var, :a}],
-               {:function, {:list, {:type_var, :a}}, {:effect_empty}, :int}} = length_type
+              {:function, {:list, {:type_var, :a}}, {:effect_empty}, :int}} = length_type
     end
   end
 
@@ -272,9 +299,10 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "formats context with bindings" do
-      ctx = Context.empty()
-      |> Context.add(:x, :int)
-      |> Context.add(:y, :string)
+      ctx =
+        Context.empty()
+        |> Context.add(:x, :int)
+        |> Context.add(:y, :string)
 
       result = Context.format(ctx)
 
@@ -285,9 +313,10 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "formats context with effects" do
-      ctx = Context.empty()
-      |> Context.add_effect({:effect_label, :io})
-      |> Context.add_effect({:effect_label, :exn})
+      ctx =
+        Context.empty()
+        |> Context.add_effect({:effect_label, :io})
+        |> Context.add_effect({:effect_label, :exn})
 
       result = Context.format(ctx)
 
@@ -296,8 +325,9 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "shows (none) for context with no effects" do
-      ctx = Context.empty()
-      |> Context.add(:x, :int)
+      ctx =
+        Context.empty()
+        |> Context.add(:x, :int)
 
       result = Context.format(ctx)
 
@@ -308,11 +338,14 @@ defmodule Litmus.Inference.ContextTest do
   describe "integration: realistic inference scenarios" do
     test "type checking a let expression with scoping" do
       # let x = 5 in let y = x + 1 in y
-      ctx = Context.empty()
-      |> Context.enter_scope()  # enter let scope for x
-      |> Context.add(:x, :int)
-      |> Context.enter_scope()  # enter let scope for y
-      |> Context.add(:y, :int)
+      ctx =
+        Context.empty()
+        # enter let scope for x
+        |> Context.enter_scope()
+        |> Context.add(:x, :int)
+        # enter let scope for y
+        |> Context.enter_scope()
+        |> Context.add(:y, :int)
 
       assert Context.has_binding?(ctx, :x)
       assert Context.has_binding?(ctx, :y)
@@ -321,14 +354,16 @@ defmodule Litmus.Inference.ContextTest do
 
     test "tracking effects through function composition" do
       # Functions that compose effects
-      ctx = Context.empty()
-      |> Context.add(:read_file, {:function, :string, {:effect_label, :file}, :string})
-      |> Context.add(:print, {:function, :string, {:effect_label, :io}, {:tuple, []}})
+      ctx =
+        Context.empty()
+        |> Context.add(:read_file, {:function, :string, {:effect_label, :file}, :string})
+        |> Context.add(:print, {:function, :string, {:effect_label, :io}, {:tuple, []}})
 
       # Compose them
-      ctx = ctx
-      |> Context.add_effect({:effect_label, :file})
-      |> Context.add_effect({:effect_label, :io})
+      ctx =
+        ctx
+        |> Context.add_effect({:effect_label, :file})
+        |> Context.add_effect({:effect_label, :io})
 
       effects = Context.get_effects(ctx)
 
@@ -337,10 +372,11 @@ defmodule Litmus.Inference.ContextTest do
     end
 
     test "applying substitution updates all bindings" do
-      ctx = Context.empty()
-      |> Context.add(:x, {:type_var, :a})
-      |> Context.add(:y, {:list, {:type_var, :a}})
-      |> Context.add(:z, {:type_var, :b})
+      ctx =
+        Context.empty()
+        |> Context.add(:x, {:type_var, :a})
+        |> Context.add(:y, {:list, {:type_var, :a}})
+        |> Context.add(:z, {:type_var, :b})
 
       # Infer that a = Int, b = String
       subst = %{
@@ -359,14 +395,14 @@ defmodule Litmus.Inference.ContextTest do
       # Start with polymorphic map: ∀a b. (a -> b, List[a]) -> List[b]
       ctx = Context.with_stdlib()
 
-      map_type = {:forall, [{:type_var, :a}, {:type_var, :b}],
-                   {:function,
-                     {:tuple, [
-                       {:function, {:type_var, :a}, Core.empty_effect(), {:type_var, :b}},
-                       {:list, {:type_var, :a}}
-                     ]},
-                     Core.empty_effect(),
-                     {:list, {:type_var, :b}}}}
+      map_type =
+        {:forall, [{:type_var, :a}, {:type_var, :b}],
+         {:function,
+          {:tuple,
+           [
+             {:function, {:type_var, :a}, Core.empty_effect(), {:type_var, :b}},
+             {:list, {:type_var, :a}}
+           ]}, Core.empty_effect(), {:list, {:type_var, :b}}}}
 
       ctx = Context.add(ctx, :map, map_type)
 

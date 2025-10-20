@@ -12,11 +12,14 @@ defmodule InferAnalysisTest do
     case ASTWalker.analyze_ast(ast) do
       {:ok, result} ->
         mfa = {module, function, arity}
+
         case Map.get(result.functions, mfa) do
           nil -> {:error, :function_not_found}
           func_analysis -> {:ok, func_analysis}
         end
-      error -> error
+
+      error ->
+        error
     end
   end
 
@@ -25,9 +28,12 @@ defmodule InferAnalysisTest do
     case get_function_effect(module, function, arity) do
       {:ok, func_analysis} ->
         compact = Core.to_compact_effect(func_analysis.effect)
+
         assert compact == expected_compact,
-          "Expected #{function}/#{arity} to have effect #{inspect(expected_compact)}, got #{inspect(compact)}"
+               "Expected #{function}/#{arity} to have effect #{inspect(expected_compact)}, got #{inspect(compact)}"
+
         func_analysis
+
       {:error, reason} ->
         flunk("Failed to analyze #{function}/#{arity}: #{inspect(reason)}")
     end
@@ -77,25 +83,29 @@ defmodule InferAnalysisTest do
 
   describe "Lambda Effect Propagation - Effectful Lambdas" do
     test "map_with_io_lambda/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :map_with_io_lambda, 1, :s)
+      func = assert_effect_type(Support.InferTest, :map_with_io_lambda, 1, {:s, ["IO.puts/1"]})
       assert {Enum, :map, 2} in func.calls
       assert {IO, :puts, 1} in func.calls
     end
 
     test "filter_with_io_lambda/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :filter_with_io_lambda, 1, :s)
+      func =
+        assert_effect_type(Support.InferTest, :filter_with_io_lambda, 1, {:s, ["IO.inspect/2"]})
+
       assert {Enum, :filter, 2} in func.calls
       assert {IO, :inspect, 2} in func.calls
     end
 
     test "each_always_effectful/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :each_always_effectful, 1, :s)
+      func = assert_effect_type(Support.InferTest, :each_always_effectful, 1, {:s, ["IO.puts/1"]})
       assert {Enum, :each, 2} in func.calls
       assert {IO, :puts, 1} in func.calls
     end
 
     test "mixed_pure_and_effectful/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :mixed_pure_and_effectful, 1, :s)
+      func =
+        assert_effect_type(Support.InferTest, :mixed_pure_and_effectful, 1, {:s, ["IO.puts/1"]})
+
       assert {Enum, :map, 2} in func.calls
       assert {Enum, :filter, 2} in func.calls
       assert {IO, :puts, 1} in func.calls
@@ -113,9 +123,9 @@ defmodule InferAnalysisTest do
       assert {Enum, :reduce, 3} in func.calls
     end
 
-    test "pipe_with_captures/1 is lambda-dependent" do
-      # Function captures create lambda-dependent effects
-      func = assert_effect_type(Support.InferTest, :pipe_with_captures, 1, :l)
+    test "pipe_with_captures/1 is pure" do
+      # All captured functions are pure
+      func = assert_effect_type(Support.InferTest, :pipe_with_captures, 1, :p)
       assert {Enum, :map, 2} in func.calls
       assert {Enum, :filter, 2} in func.calls
       assert {Enum, :reduce, 3} in func.calls
@@ -124,26 +134,35 @@ defmodule InferAnalysisTest do
 
   describe "Function Capture - Effectful" do
     test "map_with_io_capture/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :map_with_io_capture, 1, :s)
+      func =
+        assert_effect_type(Support.InferTest, :map_with_io_capture, 1, {:s, ["IO.inspect/1"]})
+
       assert {Enum, :map, 2} in func.calls
     end
 
     test "each_with_io_capture/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :each_with_io_capture, 1, :s)
+      func = assert_effect_type(Support.InferTest, :each_with_io_capture, 1, {:s, ["IO.puts/1"]})
       assert {Enum, :each, 2} in func.calls
     end
   end
 
   describe "Mixed Lambdas and Captures" do
-    test "mixed_lambda_and_capture/1 is lambda-dependent" do
-      # Function captures create lambda-dependent effects
-      func = assert_effect_type(Support.InferTest, :mixed_lambda_and_capture, 1, :l)
+    test "mixed_lambda_and_capture/1 is pure" do
+      # Mix of pure lambda and pure captures results in pure function
+      func = assert_effect_type(Support.InferTest, :mixed_lambda_and_capture, 1, :p)
       assert {Enum, :map, 2} in func.calls
       assert {Enum, :filter, 2} in func.calls
     end
 
     test "mixed_with_effectful_lambda/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :mixed_with_effectful_lambda, 1, :s)
+      func =
+        assert_effect_type(
+          Support.InferTest,
+          :mixed_with_effectful_lambda,
+          1,
+          {:s, ["IO.puts/1"]}
+        )
+
       assert {Enum, :map, 2} in func.calls
       assert {Enum, :each, 2} in func.calls
       assert {IO, :puts, 1} in func.calls
@@ -152,23 +171,34 @@ defmodule InferAnalysisTest do
 
   describe "Higher-Order with Side Effects" do
     test "spawn_with_pure_lambda/1 is effectful (spawn is always effectful)" do
-      func = assert_effect_type(Support.InferTest, :spawn_with_pure_lambda, 1, :s)
+      func =
+        assert_effect_type(
+          Support.InferTest,
+          :spawn_with_pure_lambda,
+          1,
+          {:s, ["Kernel.spawn/1"]}
+        )
+
       assert {Kernel, :spawn, 1} in func.calls
     end
 
     test "spawn_with_io_lambda/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :spawn_with_io_lambda, 1, :s)
+      func =
+        assert_effect_type(Support.InferTest, :spawn_with_io_lambda, 1, {:s, ["Kernel.spawn/1"]})
+
       assert {Kernel, :spawn, 1} in func.calls
       assert {IO, :puts, 1} in func.calls
     end
 
     test "task_async_pure/1 is effectful (Task is always effectful)" do
-      func = assert_effect_type(Support.InferTest, :task_async_pure, 1, :s)
+      func = assert_effect_type(Support.InferTest, :task_async_pure, 1, {:s, ["Task.async/1"]})
       assert {Task, :async, 1} in func.calls
     end
 
     test "task_async_effectful/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :task_async_effectful, 1, :s)
+      func =
+        assert_effect_type(Support.InferTest, :task_async_effectful, 1, {:s, ["Task.async/1"]})
+
       assert {Task, :async, 1} in func.calls
       assert {IO, :puts, 1} in func.calls
     end
@@ -176,22 +206,22 @@ defmodule InferAnalysisTest do
 
   describe "Side Effects" do
     test "write_to_file/2 is effectful" do
-      func = assert_effect_type(Support.InferTest, :write_to_file, 2, :s)
+      func = assert_effect_type(Support.InferTest, :write_to_file, 2, {:s, ["File.write!/2"]})
       assert {File, :write!, 2} in func.calls
     end
 
     test "read_from_file/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :read_from_file, 1, :s)
+      func = assert_effect_type(Support.InferTest, :read_from_file, 1, {:s, ["File.read!/1"]})
       assert {File, :read!, 1} in func.calls
     end
 
     test "log_message/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :log_message, 1, :s)
+      func = assert_effect_type(Support.InferTest, :log_message, 1, {:s, ["IO.puts/1"]})
       assert {IO, :puts, 1} in func.calls
     end
 
     test "modify_ets/3 is effectful" do
-      assert_effect_type(Support.InferTest, :modify_ets, 3, :s)
+      assert_effect_type(Support.InferTest, :modify_ets, 3, {:s, ["ets.insert/2"]})
     end
   end
 
@@ -211,16 +241,22 @@ defmodule InferAnalysisTest do
   end
 
   describe "Complex Pipelines" do
-    test "complex_pipeline/1 is unknown" do
+    test "complex_pipeline_pure/1 is pure" do
+      func = assert_effect_type(Support.InferTest, :complex_pipeline_pure, 1, :p)
+      assert {Enum, :map, 2} in func.calls
+      assert {Enum, :filter, 2} in func.calls
+    end
+
+    test "complex_pipeline/1 has exception effect" do
       # Pattern matching in lambda (fn {k, v} -> ...) creates unknown effects
-      func = assert_effect_type(Support.InferTest, :complex_pipeline, 1, :u)
+      func = assert_effect_type(Support.InferTest, :complex_pipeline, 1, {:e, [:exn]})
       assert {Enum, :map, 2} in func.calls
       assert {Enum, :filter, 2} in func.calls
       assert {Enum, :group_by, 2} in func.calls
     end
 
     test "complex_with_io/1 is effectful" do
-      func = assert_effect_type(Support.InferTest, :complex_with_io, 1, :s)
+      func = assert_effect_type(Support.InferTest, :complex_with_io, 1, {:s, ["IO.inspect/2"]})
       assert {Enum, :map, 2} in func.calls
       assert {IO, :inspect, 2} in func.calls
     end
@@ -238,9 +274,9 @@ defmodule InferAnalysisTest do
       assert {Enum, :map, 2} in func.calls
     end
 
-    test "lambda_with_pattern_match/1 is unknown" do
+    test "lambda_with_pattern_match/1 is pure" do
       # Pattern matching in lambdas creates unknown effects currently
-      func = assert_effect_type(Support.InferTest, :lambda_with_pattern_match, 1, :u)
+      func = assert_effect_type(Support.InferTest, :lambda_with_pattern_match, 1, :p)
       assert {Enum, :map, 2} in func.calls
     end
   end

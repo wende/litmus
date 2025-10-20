@@ -87,6 +87,7 @@ defmodule Support.HigherOrderDemo do
   # but if we use it with IO...
   def use_multiplier_with_io(list, factor) do
     multiplier = create_multiplier(factor)
+
     Enum.map(list, fn x ->
       result = multiplier.(x)
       IO.puts("Result: #{result}")

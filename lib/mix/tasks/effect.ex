@@ -12,6 +12,9 @@ defmodule Mix.Tasks.Effect do
       --json            Output results in JSON format
       --exceptions      Include exception analysis
       --purity          Include purity analysis from PURITY analyzer
+      --filter TYPE     Only show functions with specific effect type
+                        (p=pure, s=side-effects, l=lambda, d=dependent,
+                         e=exception, u=unknown)
 
   ## Examples
 
@@ -20,6 +23,12 @@ defmodule Mix.Tasks.Effect do
 
       # Verbose output with types
       mix effect lib/my_module.ex --verbose
+
+      # Show only unknown functions
+      mix effect lib/my_module.ex --filter u
+
+      # Show only lambda-dependent functions
+      mix effect lib/my_module.ex --filter l
 
       # Include exception tracking
       mix effect lib/my_module.ex --exceptions
@@ -36,8 +45,17 @@ defmodule Mix.Tasks.Effect do
 
   # Stateful Kernel functions that should be displayed (rest are hidden as noise)
   @stateful_kernel_functions [
-    :send, :spawn, :spawn_link, :spawn_monitor, :apply, :exit, :self, :make_ref,
-    :raise, :reraise, :throw
+    :send,
+    :spawn,
+    :spawn_link,
+    :spawn_monitor,
+    :apply,
+    :exit,
+    :self,
+    :make_ref,
+    :raise,
+    :reraise,
+    :throw
   ]
 
   @deps_cache_path ".effects/deps.cache"
@@ -50,7 +68,13 @@ defmodule Mix.Tasks.Effect do
     # Parse options
     {opts, paths, _} =
       OptionParser.parse(args,
-        switches: [verbose: :boolean, json: :boolean, exceptions: :boolean, purity: :boolean],
+        switches: [
+          verbose: :boolean,
+          json: :boolean,
+          exceptions: :boolean,
+          purity: :boolean,
+          filter: :string
+        ],
         aliases: [v: :verbose]
       )
 
@@ -136,7 +160,15 @@ defmodule Mix.Tasks.Effect do
   defp discover_app_files do
     get_elixirc_paths()
     |> Enum.flat_map(&find_ex_files/1)
+    |> Enum.reject(&litmus_internal_file?/1)
     |> Enum.uniq()
+  end
+
+  # Exclude Litmus's own internal files from being analyzed
+  # (they use compile-time attributes that cause issues during macro expansion)
+  defp litmus_internal_file?(path) do
+    String.contains?(path, "lib/litmus/") or
+      String.contains?(path, "lib/mix/tasks/")
   end
 
   defp get_elixirc_paths do
@@ -293,18 +325,33 @@ defmodule Mix.Tasks.Effect do
       # Sort functions by name and arity
       sorted_functions = Enum.sort_by(functions, fn {{_m, f, a}, _} -> {f, a} end)
 
-      Enum.each(sorted_functions, fn {{_m, name, arity}, analysis} ->
-        display_function(name, arity, analysis, opts)
-      end)
+      # Apply filter if specified
+      filtered_functions =
+        case Keyword.get(opts, :filter) do
+          nil -> sorted_functions
+          filter_type -> filter_by_effect(sorted_functions, filter_type)
+        end
+
+      if Enum.empty?(filtered_functions) do
+        Mix.shell().info("No functions matching filter criteria.\n")
+      else
+        Enum.each(filtered_functions, fn {{_m, name, arity}, analysis} ->
+          display_function(name, arity, analysis, opts)
+        end)
+      end
     end
 
     # Display errors if any
     unless Enum.empty?(errors) do
       Mix.shell().info("\n#{IO.ANSI.yellow()}⚠ Warnings/Errors:#{IO.ANSI.reset()}")
       Mix.shell().info("═══════════════════════════════════════════════════════════\n")
+
       Enum.each(errors, fn error ->
         {_mod, func, line} = error.location
-        Mix.shell().info("  #{IO.ANSI.red()}•#{IO.ANSI.reset()} #{func} (line #{line})\n    #{error.message}\n")
+
+        Mix.shell().info(
+          "  #{IO.ANSI.red()}•#{IO.ANSI.reset()} #{func} (line #{line})\n    #{error.message}\n"
+        )
       end)
     end
 
@@ -318,16 +365,36 @@ defmodule Mix.Tasks.Effect do
     unknown_count = counts[:u]
     exception_count = counts[:e]
     effectful_count = counts[:s]
-    total = pure_count + dependent_count + lambda_count + unknown_count + exception_count + effectful_count
+
+    total =
+      pure_count + dependent_count + lambda_count + unknown_count + exception_count +
+        effectful_count
 
     Mix.shell().info("Summary: #{total} functions analyzed")
     Mix.shell().info("  #{IO.ANSI.green()}✓#{IO.ANSI.reset()} Pure: #{pure_count}")
-    if dependent_count > 0, do: Mix.shell().info("  #{IO.ANSI.blue()}◐#{IO.ANSI.reset()} Context-dependent: #{dependent_count}")
-    if lambda_count > 0, do: Mix.shell().info("  #{IO.ANSI.cyan()}λ#{IO.ANSI.reset()} Lambda-dependent: #{lambda_count}")
-    if unknown_count > 0, do: Mix.shell().info("  #{IO.ANSI.magenta()}?#{IO.ANSI.reset()} Unknown: #{unknown_count}")
-    if exception_count > 0, do: Mix.shell().info("  #{IO.ANSI.red()}⚠#{IO.ANSI.reset()} Exception: #{exception_count}")
+
+    if dependent_count > 0,
+      do:
+        Mix.shell().info(
+          "  #{IO.ANSI.blue()}◐#{IO.ANSI.reset()} Context-dependent: #{dependent_count}"
+        )
+
+    if lambda_count > 0,
+      do:
+        Mix.shell().info(
+          "  #{IO.ANSI.cyan()}λ#{IO.ANSI.reset()} Lambda-dependent: #{lambda_count}"
+        )
+
+    if unknown_count > 0,
+      do: Mix.shell().info("  #{IO.ANSI.magenta()}?#{IO.ANSI.reset()} Unknown: #{unknown_count}")
+
+    if exception_count > 0,
+      do: Mix.shell().info("  #{IO.ANSI.red()}⚠#{IO.ANSI.reset()} Exception: #{exception_count}")
+
     Mix.shell().info("  #{IO.ANSI.yellow()}⚡#{IO.ANSI.reset()} Effectful: #{effectful_count}")
-    if not Enum.empty?(errors), do: Mix.shell().info("  #{IO.ANSI.red()}⚠#{IO.ANSI.reset()} Errors: #{length(errors)}")
+
+    if not Enum.empty?(errors),
+      do: Mix.shell().info("  #{IO.ANSI.red()}⚠#{IO.ANSI.reset()} Errors: #{length(errors)}")
 
     Mix.shell().info("═══════════════════════════════════════════════════════════\n")
   end
@@ -383,12 +450,23 @@ defmodule Mix.Tasks.Effect do
     compact = Core.to_compact_effect(effect)
 
     cond do
-      Effects.is_pure?(effect) -> "#{IO.ANSI.green()}✓ Pure#{IO.ANSI.reset()}"
-      compact == :l -> "#{IO.ANSI.cyan()}λ Lambda-dependent#{IO.ANSI.reset()}"
-      compact == :d -> "#{IO.ANSI.blue()}◐ Context-dependent#{IO.ANSI.reset()}"
-      compact == :u -> "#{IO.ANSI.magenta()}? Unknown#{IO.ANSI.reset()}"
-      match?({:e, _}, compact) -> "#{IO.ANSI.red()}⚠ Exception#{IO.ANSI.reset()}"
-      true -> "#{IO.ANSI.yellow()}⚡ Effectful#{IO.ANSI.reset()}"
+      Effects.is_pure?(effect) ->
+        "#{IO.ANSI.green()}✓ Pure#{IO.ANSI.reset()}"
+
+      compact == :l ->
+        "#{IO.ANSI.cyan()}λ Lambda-dependent#{IO.ANSI.reset()}"
+
+      compact == :d or match?({:d, _}, compact) ->
+        "#{IO.ANSI.blue()}◐ Context-dependent#{IO.ANSI.reset()}"
+
+      compact == :u ->
+        "#{IO.ANSI.magenta()}? Unknown#{IO.ANSI.reset()}"
+
+      match?({:e, _}, compact) or compact == :e ->
+        "#{IO.ANSI.red()}⚠ Exception#{IO.ANSI.reset()}"
+
+      true ->
+        "#{IO.ANSI.yellow()}⚡ Effectful#{IO.ANSI.reset()}"
     end
   end
 
@@ -406,9 +484,40 @@ defmodule Mix.Tasks.Effect do
     cond do
       Effects.is_pure?(effect) -> IO.ANSI.green() <> "→" <> IO.ANSI.reset()
       compact == :l -> IO.ANSI.cyan() <> "λ" <> IO.ANSI.reset()
-      match?({:e, _}, compact) -> IO.ANSI.red() <> "⚠" <> IO.ANSI.reset()
+      compact == :d or match?({:d, _}, compact) -> IO.ANSI.blue() <> "◐" <> IO.ANSI.reset()
+      match?({:e, _}, compact) or compact == :e -> IO.ANSI.red() <> "⚠" <> IO.ANSI.reset()
       compact == :u -> IO.ANSI.magenta() <> "?" <> IO.ANSI.reset()
       true -> IO.ANSI.yellow() <> "⚡" <> IO.ANSI.reset()
+    end
+  end
+
+  defp filter_by_effect(functions, filter_type) do
+    filter_atom =
+      case filter_type do
+        "p" -> :p
+        "s" -> :s
+        "l" -> :l
+        "d" -> :d
+        "e" -> :e
+        "u" -> :u
+        _ -> nil
+      end
+
+    if filter_atom do
+      Enum.filter(functions, fn {{_m, _f, _a}, analysis} ->
+        compact = Core.to_compact_effect(analysis.effect)
+
+        case filter_atom do
+          :p -> Effects.is_pure?(analysis.effect)
+          :l -> compact == :l
+          :d -> compact == :d or match?({:d, _}, compact)
+          :e -> compact == :e or match?({:e, _}, compact)
+          :u -> compact == :u
+          :s -> match?({:s, _}, compact)
+        end
+      end)
+    else
+      functions
     end
   end
 
@@ -434,10 +543,19 @@ defmodule Mix.Tasks.Effect do
     initial = %{p: 0, d: 0, l: 0, u: 0, e: 0, s: 0, n: 0}
 
     Enum.reduce(functions, initial, fn {_mfa, analysis}, acc ->
+      compact = Core.to_compact_effect(analysis.effect)
+
       key =
-        case Core.to_compact_effect(analysis.effect) do
-          {:e, _} -> :e
-          other -> other
+        cond do
+          Effects.is_pure?(analysis.effect) -> :p
+          compact == :l -> :l
+          compact == :d or match?({:d, _}, compact) -> :d
+          compact == :e or match?({:e, _}, compact) -> :e
+          compact == :u -> :u
+          match?({:s, _}, compact) -> :s
+          compact == :n -> :n
+          # fallback to unknown
+          true -> :u
         end
 
       Map.update!(acc, key, &(&1 + 1))

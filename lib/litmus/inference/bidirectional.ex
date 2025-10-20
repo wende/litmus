@@ -16,8 +16,9 @@ defmodule Litmus.Inference.Bidirectional do
   alias Litmus.Inference.Context
 
   @type mode :: :synthesis | :checking
-  @type result :: {:ok, Core.elixir_type(), Core.effect_type(), Substitution.t()} |
-                  {:error, term()}
+  @type result ::
+          {:ok, Core.elixir_type(), Core.effect_type(), Substitution.t()}
+          | {:error, term()}
 
   # Counter for generating fresh variables
   defmodule VarGen do
@@ -99,13 +100,26 @@ defmodule Litmus.Inference.Bidirectional do
         handle_lambda(clauses, context, mode, expected)
 
       # Function capture operator: &Module.function/arity
-      {:&, _, [{:/, _, [{{:., _, [module_ast, function]}, _, []}, arity]}]} when is_atom(function) and is_integer(arity) ->
+      {:&, _, [{:/, _, [{{:., _, [module_ast, function]}, _, []}, arity]}]}
+      when is_atom(function) and is_integer(arity) ->
         handle_function_capture(module_ast, function, arity, context, mode, expected)
 
       # Operator capture: &+/2, &*/2, etc. (Kernel operators)
       {:&, _, [{:/, _, [{operator, _, _}, arity]}]} when is_atom(operator) and is_integer(arity) ->
         # Operators are Kernel functions
-        handle_function_capture({:__aliases__, [], [:Kernel]}, operator, arity, context, mode, expected)
+        handle_function_capture(
+          {:__aliases__, [], [:Kernel]},
+          operator,
+          arity,
+          context,
+          mode,
+          expected
+        )
+
+      # Anonymous capture: &(&1 > 5), &(&1 + &2), etc.
+      # These are syntactic sugar for lambdas and should be analyzed as such
+      {:&, _, [body]} ->
+        handle_anonymous_capture(body, context, mode, expected)
 
       # Block (MUST come before local call pattern!)
       {:__block__, _, expressions} ->
@@ -184,9 +198,10 @@ defmodule Litmus.Inference.Bidirectional do
 
       :error ->
         # Unknown variable - create fresh type variable
+        # Variables (like function parameters) are values, not computations
+        # They have no effects themselves (empty effect)
         var = VarGen.fresh_type_var()
-        eff = VarGen.fresh_effect_var()
-        {:ok, var, eff, Substitution.empty()}
+        {:ok, var, Core.empty_effect(), Substitution.empty()}
     end
   end
 
@@ -194,6 +209,7 @@ defmodule Litmus.Inference.Bidirectional do
     case Context.lookup(context, name) do
       {:ok, type} ->
         {instantiated, _effect} = instantiate_type(type)
+
         with {:ok, subst} <- Unification.unify(instantiated, expected_type),
              {:ok, subst2} <- Unification.unify_effect(Core.empty_effect(), expected_effect) do
           {:ok, expected_type, expected_effect, Substitution.compose(subst, subst2)}
@@ -236,45 +252,53 @@ defmodule Litmus.Inference.Bidirectional do
         # Extract lambda effects if:
         # 1. There are lambda arguments, AND
         # 2. The registry effect is unknown OR lambda-dependent
-        is_lambda_dependent = case effect do
-          {:effect_label, :lambda} -> true
-          {:effect_row, labels, _} -> :lambda in labels
-          _ -> false
-        end
-        should_extract_lambda_effects = has_lambda_args and
-                                       (match?({:effect_unknown}, effect) or is_lambda_dependent)
-
-        combined_effect = if should_extract_lambda_effects do
-          # Extract effects from lambda arguments
-          lambda_effects = arg_types
-          |> Enum.zip(args)
-          |> Enum.flat_map(fn
-            {{:function, _param_type, lambda_effect, _return_type}, _arg_ast} ->
-              # This argument is a lambda, include its effect
-              [lambda_effect]
-            _ ->
-              []
-          end)
-
-          # For lambda-dependent functions, use the lambda's actual effects
-          # For unknown functions, infer from lambda + arg effects
-          all_effects = arg_effects ++ lambda_effects
-          inferred_effect = Enum.reduce(all_effects, Core.empty_effect(), &Effects.combine_effects/2)
-
-          # Only wrap with :lambda if the inferred effect has unknown/variable effects
-          # If all lambda effects are concrete (pure, side effects, etc.), use those directly
-          if Enum.any?(lambda_effects, &match?({:effect_unknown}, &1)) do
-            # Has unknown lambda effects, mark as lambda-dependent
-            Effects.combine_effects({:effect_label, :lambda}, inferred_effect)
-          else
-            # All lambda effects are known, use them directly
-            inferred_effect
+        is_lambda_dependent =
+          case effect do
+            {:effect_label, :lambda} -> true
+            {:effect_row, labels, _} -> :lambda in labels
+            _ -> false
           end
-        else
-          # Normal function or function with concrete effects in registry:
-          # Just combine argument construction effects with function's effect from registry
-          Enum.reduce(arg_effects, effect, &Effects.combine_effects/2)
-        end
+
+        should_extract_lambda_effects =
+          has_lambda_args and
+            (match?({:effect_unknown}, effect) or is_lambda_dependent)
+
+        combined_effect =
+          if should_extract_lambda_effects do
+            # Extract effects from lambda arguments
+            lambda_effects =
+              arg_types
+              |> Enum.zip(args)
+              |> Enum.flat_map(fn
+                {{:function, _param_type, lambda_effect, _return_type}, _arg_ast} ->
+                  # This argument is a lambda, include its effect
+                  [lambda_effect]
+
+                _ ->
+                  []
+              end)
+
+            # For lambda-dependent functions, use the lambda's actual effects
+            # For unknown functions, infer from lambda + arg effects
+            all_effects = arg_effects ++ lambda_effects
+
+            inferred_effect =
+              Enum.reduce(all_effects, Core.empty_effect(), &Effects.combine_effects/2)
+
+            # Only wrap with :lambda if the inferred effect has unknown/variable effects
+            # If all lambda effects are concrete (pure, side effects, etc.), use those directly
+            if Enum.any?(lambda_effects, &match?({:effect_unknown}, &1)) do
+              # Has unknown lambda effects, mark as lambda-dependent
+              Effects.combine_effects({:effect_label, :lambda}, inferred_effect)
+            else
+              # All lambda effects are known, use them directly
+              inferred_effect
+            end
+          else
+            # Normal function or function with concrete effects in registry:
+            # Just combine argument construction effects with function's effect from registry
+            Enum.reduce(arg_effects, effect, &Effects.combine_effects/2)
+          end
 
         combined_subst = Enum.reduce(arg_substs, Substitution.empty(), &Substitution.compose/2)
 
@@ -287,10 +311,15 @@ defmodule Litmus.Inference.Bidirectional do
 
           :checking ->
             {expected_type, expected_effect} = expected
+
             with {:ok, subst} <- Unification.unify(return_type, expected_type),
                  {:ok, subst2} <- Unification.unify_effect(combined_effect, expected_effect) do
-              final_subst = Substitution.compose(combined_subst,
-                                                 Substitution.compose(subst, subst2))
+              final_subst =
+                Substitution.compose(
+                  combined_subst,
+                  Substitution.compose(subst, subst2)
+                )
+
               {:ok, expected_type, expected_effect, final_subst}
             end
         end
@@ -316,7 +345,9 @@ defmodule Litmus.Inference.Bidirectional do
 
             # Combine: argument effects + function effect
             combined_effect = Enum.reduce(arg_effects, func_effect, &Effects.combine_effects/2)
-            combined_subst = Enum.reduce([var_subst | arg_substs], Substitution.empty(), &Substitution.compose/2)
+
+            combined_subst =
+              Enum.reduce([var_subst | arg_substs], Substitution.empty(), &Substitution.compose/2)
 
             case mode do
               :synthesis ->
@@ -324,9 +355,12 @@ defmodule Litmus.Inference.Bidirectional do
 
               :checking ->
                 {expected_type, expected_effect} = expected
+
                 with {:ok, subst} <- Unification.unify(return_type, expected_type),
                      {:ok, subst2} <- Unification.unify_effect(combined_effect, expected_effect) do
-                  final_subst = Substitution.compose(combined_subst, Substitution.compose(subst, subst2))
+                  final_subst =
+                    Substitution.compose(combined_subst, Substitution.compose(subst, subst2))
+
                   {:ok, expected_type, expected_effect, final_subst}
                 end
             end
@@ -347,8 +381,11 @@ defmodule Litmus.Inference.Bidirectional do
             arg_substs = Enum.map(arg_results, fn {:ok, _, _, subst} -> subst end)
 
             # Unknown function call - combine argument effects with fresh effect var
-            combined_effect = Enum.reduce(arg_effects, VarGen.fresh_effect_var(), &Effects.combine_effects/2)
-            combined_subst = Enum.reduce(arg_substs, Substitution.empty(), &Substitution.compose/2)
+            combined_effect =
+              Enum.reduce(arg_effects, VarGen.fresh_effect_var(), &Effects.combine_effects/2)
+
+            combined_subst =
+              Enum.reduce(arg_substs, Substitution.empty(), &Substitution.compose/2)
 
             return_type = VarGen.fresh_type_var()
 
@@ -358,9 +395,12 @@ defmodule Litmus.Inference.Bidirectional do
 
               :checking ->
                 {expected_type, expected_effect} = expected
+
                 with {:ok, subst} <- Unification.unify(return_type, expected_type),
                      {:ok, subst2} <- Unification.unify_effect(combined_effect, expected_effect) do
-                  final_subst = Substitution.compose(combined_subst, Substitution.compose(subst, subst2))
+                  final_subst =
+                    Substitution.compose(combined_subst, Substitution.compose(subst, subst2))
+
                   {:ok, expected_type, expected_effect, final_subst}
                 end
             end
@@ -382,12 +422,13 @@ defmodule Litmus.Inference.Bidirectional do
     # Try to get effect from Kernel registry
     # If it exists, this is a Kernel function
     # Use try/catch to handle MissingStdlibEffectError gracefully
-    is_kernel = try do
-      effect = Litmus.Effects.Registry.effect_type({Kernel, func, arity})
-      effect != nil
-    rescue
-      _ -> false
-    end
+    is_kernel =
+      try do
+        effect = Litmus.Effects.Registry.effect_type({Kernel, func, arity})
+        effect != nil
+      rescue
+        _ -> false
+      end
 
     if is_kernel do
       # It's a Kernel function, handle it normally
@@ -407,7 +448,9 @@ defmodule Litmus.Inference.Bidirectional do
           arg_substs = Enum.map(arg_results, fn {:ok, _, _, subst} -> subst end)
 
           # Combine argument effects with unknown function effect
-          combined_effect = Enum.reduce(arg_effects, VarGen.fresh_effect_var(), &Effects.combine_effects/2)
+          combined_effect =
+            Enum.reduce(arg_effects, VarGen.fresh_effect_var(), &Effects.combine_effects/2)
+
           combined_subst = Enum.reduce(arg_substs, Substitution.empty(), &Substitution.compose/2)
 
           return_type = VarGen.fresh_type_var()
@@ -418,10 +461,15 @@ defmodule Litmus.Inference.Bidirectional do
 
             :checking ->
               {expected_type, expected_effect} = expected
+
               with {:ok, subst} <- Unification.unify(return_type, expected_type),
                    {:ok, subst2} <- Unification.unify_effect(combined_effect, expected_effect) do
-                final_subst = Substitution.compose(combined_subst,
-                                                   Substitution.compose(subst, subst2))
+                final_subst =
+                  Substitution.compose(
+                    combined_subst,
+                    Substitution.compose(subst, subst2)
+                  )
+
                 {:ok, expected_type, expected_effect, final_subst}
               end
           end
@@ -450,6 +498,54 @@ defmodule Litmus.Inference.Bidirectional do
     {:ok, fun_type, Core.empty_effect(), Substitution.empty()}
   end
 
+  # Handle anonymous captures: &(&1 > 5), &(&1 + &2), etc.
+  defp handle_anonymous_capture(body, context, mode, expected) do
+    # Find the maximum argument number used in the capture
+    arity = find_max_capture_arg(body)
+
+    # Create parameter names and variables
+    params = for i <- 1..arity, do: {:"arg#{i}", [], Elixir}
+
+    # Transform the body by replacing {:&, [], [n]} with the corresponding parameter
+    transformed_body = transform_capture_body(body, params)
+
+    # Create a lambda clause
+    lambda_clause = {:->, [], [params, transformed_body]}
+
+    # Analyze as a lambda
+    handle_lambda([lambda_clause], context, mode, expected)
+  end
+
+  # Find the maximum capture argument number (&1, &2, etc.) in an expression
+  defp find_max_capture_arg(ast) do
+    {_, max} =
+      Macro.prewalk(ast, 0, fn node, max ->
+        case node do
+          {:&, _, [n]} when is_integer(n) and n > 0 ->
+            {{:&, [], [n]}, max(max, n)}
+
+          _ ->
+            {node, max}
+        end
+      end)
+
+    max
+  end
+
+  # Transform capture body by replacing {:&, [], [n]} with parameter variables
+  defp transform_capture_body(body, params) do
+    Macro.prewalk(body, fn node ->
+      case node do
+        {:&, _, [n]} when is_integer(n) and n > 0 ->
+          # Replace &n with the nth parameter (1-indexed)
+          Enum.at(params, n - 1)
+
+        _ ->
+          node
+      end
+    end)
+  end
+
   # Handle lambda expressions
   defp handle_lambda(clauses, context, mode, expected) do
     case mode do
@@ -465,11 +561,12 @@ defmodule Litmus.Inference.Bidirectional do
   defp synthesize_lambda([{:->, _, [params, body]}], context) when is_list(params) do
     # Single clause lambda with one or more parameters
     # Create fresh type variables for each parameter
-    {param_types, new_context} = Enum.reduce(params, {[], context}, fn param, {types, ctx} ->
-      param_type = VarGen.fresh_type_var()
-      param_name = extract_param_name(param)
-      {[param_type | types], Context.add(ctx, param_name, param_type)}
-    end)
+    {param_types, new_context} =
+      Enum.reduce(params, {[], context}, fn param, {types, ctx} ->
+        param_type = VarGen.fresh_type_var()
+        param_name = extract_param_name(param)
+        {[param_type | types], Context.add(ctx, param_name, param_type)}
+      end)
 
     param_types = Enum.reverse(param_types)
 
@@ -477,17 +574,21 @@ defmodule Litmus.Inference.Bidirectional do
     case synthesize(body, new_context) do
       {:ok, body_type, body_effect, subst} ->
         # Build function type based on number of parameters
-        fun_type = case param_types do
-          [] ->
-            # Zero-arity function
-            Core.function_type({:tuple, []}, body_effect, body_type)
-          [single] ->
-            # Single parameter
-            Core.function_type(single, body_effect, body_type)
-          multiple ->
-            # Multiple parameters - use tuple
-            Core.function_type({:tuple, multiple}, body_effect, body_type)
-        end
+        fun_type =
+          case param_types do
+            [] ->
+              # Zero-arity function
+              Core.function_type({:tuple, []}, body_effect, body_type)
+
+            [single] ->
+              # Single parameter
+              Core.function_type(single, body_effect, body_type)
+
+            multiple ->
+              # Multiple parameters - use tuple
+              Core.function_type({:tuple, multiple}, body_effect, body_type)
+          end
+
         {:ok, fun_type, Core.empty_effect(), subst}
 
       error ->
@@ -500,25 +601,28 @@ defmodule Litmus.Inference.Bidirectional do
     {:error, :complex_lambda_not_supported}
   end
 
-  defp check_lambda([{:->, _, [params, body]}], context, expected_type, _expected_effect) when is_list(params) do
+  defp check_lambda([{:->, _, [params, body]}], context, expected_type, _expected_effect)
+       when is_list(params) do
     case expected_type do
       {:function, param_type, effect, return_type} ->
         # Extract expected parameter types
-        expected_param_types = case param_type do
-          {:tuple, types} -> types
-          single -> [single]
-        end
+        expected_param_types =
+          case param_type do
+            {:tuple, types} -> types
+            single -> [single]
+          end
 
         # Check that parameter count matches
         if length(params) != length(expected_param_types) do
           {:error, {:arity_mismatch, length(params), length(expected_param_types)}}
         else
           # Add all parameters to context with their expected types
-          new_context = Enum.zip(params, expected_param_types)
-                        |> Enum.reduce(context, fn {param, param_type}, ctx ->
-                          param_name = extract_param_name(param)
-                          Context.add(ctx, param_name, param_type)
-                        end)
+          new_context =
+            Enum.zip(params, expected_param_types)
+            |> Enum.reduce(context, fn {param, param_type}, ctx ->
+              param_name = extract_param_name(param)
+              Context.add(ctx, param_name, param_type)
+            end)
 
           # Check body against expected return type and effect
           check(body, return_type, effect, new_context)
@@ -572,14 +676,26 @@ defmodule Litmus.Inference.Bidirectional do
           # Synthesize or check branches
           case mode do
             :synthesis ->
-              synthesize_if_branches(then_branch, else_branch, context,
-                                     cond_effect, Substitution.compose(cond_subst, bool_subst))
+              synthesize_if_branches(
+                then_branch,
+                else_branch,
+                context,
+                cond_effect,
+                Substitution.compose(cond_subst, bool_subst)
+              )
 
             :checking ->
               {expected_type, expected_effect} = expected
-              check_if_branches(then_branch, else_branch, context,
-                                expected_type, expected_effect,
-                                cond_effect, Substitution.compose(cond_subst, bool_subst))
+
+              check_if_branches(
+                then_branch,
+                else_branch,
+                context,
+                expected_type,
+                expected_effect,
+                cond_effect,
+                Substitution.compose(cond_subst, bool_subst)
+              )
           end
         end
 
@@ -590,16 +706,16 @@ defmodule Litmus.Inference.Bidirectional do
 
   defp synthesize_if_branches(then_branch, else_branch, context, cond_effect, subst) do
     case {synthesize(then_branch, context), synthesize(else_branch, context)} do
-      {{:ok, then_type, then_effect, then_subst},
-       {:ok, else_type, else_effect, else_subst}} ->
+      {{:ok, then_type, then_effect, then_subst}, {:ok, else_type, else_effect, else_subst}} ->
         # Unify branch types
         with {:ok, type_subst} <- Unification.unify(then_type, else_type) do
           # Combine effects
           branch_effects = Effects.combine_effects(then_effect, else_effect)
           total_effect = Effects.combine_effects(cond_effect, branch_effects)
 
-          final_subst = [subst, then_subst, else_subst, type_subst]
-                        |> Enum.reduce(Substitution.empty(), &Substitution.compose/2)
+          final_subst =
+            [subst, then_subst, else_subst, type_subst]
+            |> Enum.reduce(Substitution.empty(), &Substitution.compose/2)
 
           unified_type = Substitution.apply_subst(final_subst, then_type)
           {:ok, unified_type, total_effect, final_subst}
@@ -610,17 +726,25 @@ defmodule Litmus.Inference.Bidirectional do
     end
   end
 
-  defp check_if_branches(then_branch, else_branch, context,
-                         expected_type, expected_effect,
-                         cond_effect, subst) do
+  defp check_if_branches(
+         then_branch,
+         else_branch,
+         context,
+         expected_type,
+         expected_effect,
+         cond_effect,
+         subst
+       ) do
     # Check both branches against expected type
     remaining_effect = remove_effect_prefix(expected_effect, cond_effect)
 
     case {check(then_branch, expected_type, remaining_effect, context),
           check(else_branch, expected_type, remaining_effect, context)} do
       {{:ok, _, _, then_subst}, {:ok, _, _, else_subst}} ->
-        final_subst = [subst, then_subst, else_subst]
-                      |> Enum.reduce(Substitution.empty(), &Substitution.compose/2)
+        final_subst =
+          [subst, then_subst, else_subst]
+          |> Enum.reduce(Substitution.empty(), &Substitution.compose/2)
+
         {:ok, expected_type, expected_effect, final_subst}
 
       _ ->
@@ -628,14 +752,142 @@ defmodule Litmus.Inference.Bidirectional do
     end
   end
 
-  # Handle case expressions (simplified)
-  defp handle_case(_scrutinee, _clauses, _context, _mode, _expected) do
-    {:error, :case_not_yet_implemented}
+  # Handle case expressions
+  defp handle_case(scrutinee, clauses, context, mode, expected) do
+    # Synthesize the scrutinee type
+    case synthesize(scrutinee, context) do
+      {:ok, _scrutinee_type, scrutinee_effect, scrutinee_subst} ->
+        # Analyze all case clauses
+        case mode do
+          :synthesis ->
+            synthesize_case_clauses(clauses, context, scrutinee_effect, scrutinee_subst)
+
+          :checking ->
+            {expected_type, expected_effect} = expected
+
+            check_case_clauses(
+              clauses,
+              context,
+              expected_type,
+              expected_effect,
+              scrutinee_effect,
+              scrutinee_subst
+            )
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp synthesize_case_clauses([], _context, _scrutinee_effect, _subst) do
+    {:error, :empty_case}
+  end
+
+  defp synthesize_case_clauses(clauses, context, scrutinee_effect, subst) do
+    # Synthesize each clause body
+    clause_results =
+      Enum.map(clauses, fn {:->, _, [_pattern, body]} ->
+        synthesize(body, context)
+      end)
+
+    # Check if any clause failed
+    case Enum.find(clause_results, &match?({:error, _}, &1)) do
+      {:error, _} = error ->
+        error
+
+      nil ->
+        # Extract types, effects, and substitutions
+        clause_types = Enum.map(clause_results, fn {:ok, type, _, _} -> type end)
+        clause_effects = Enum.map(clause_results, fn {:ok, _, eff, _} -> eff end)
+        clause_substs = Enum.map(clause_results, fn {:ok, _, _, s} -> s end)
+
+        # Unify all clause types to get a common return type
+        case unify_all_types(clause_types) do
+          {:ok, unified_type, type_subst} ->
+            # Combine all effects
+            combined_clause_effects =
+              Enum.reduce(clause_effects, Core.empty_effect(), &Effects.combine_effects/2)
+
+            total_effect = Effects.combine_effects(scrutinee_effect, combined_clause_effects)
+
+            # Compose all substitutions
+            all_substs = [subst, type_subst | clause_substs]
+            final_subst = Enum.reduce(all_substs, Substitution.empty(), &Substitution.compose/2)
+
+            final_type = Substitution.apply_subst(final_subst, unified_type)
+            {:ok, final_type, total_effect, final_subst}
+
+          {:error, _} = error ->
+            error
+        end
+    end
+  end
+
+  defp check_case_clauses(
+         clauses,
+         context,
+         expected_type,
+         expected_effect,
+         scrutinee_effect,
+         subst
+       ) do
+    # Remove scrutinee effect from expected effect
+    remaining_effect = remove_effect_prefix(expected_effect, scrutinee_effect)
+
+    # Check each clause body against expected type
+    clause_results =
+      Enum.map(clauses, fn {:->, _, [_pattern, body]} ->
+        check(body, context, expected_type, remaining_effect)
+      end)
+
+    # Check if any clause failed
+    case Enum.find(clause_results, &match?({:error, _}, &1)) do
+      {:error, _} = error ->
+        error
+
+      nil ->
+        # Extract effects and substitutions
+        clause_effects = Enum.map(clause_results, fn {:ok, _, eff, _} -> eff end)
+        clause_substs = Enum.map(clause_results, fn {:ok, _, _, s} -> s end)
+
+        # Combine all effects
+        combined_clause_effects =
+          Enum.reduce(clause_effects, Core.empty_effect(), &Effects.combine_effects/2)
+
+        total_effect = Effects.combine_effects(scrutinee_effect, combined_clause_effects)
+
+        # Compose all substitutions
+        all_substs = [subst | clause_substs]
+        final_subst = Enum.reduce(all_substs, Substitution.empty(), &Substitution.compose/2)
+
+        {:ok, expected_type, total_effect, final_subst}
+    end
+  end
+
+  # Helper to unify all types in a list
+  defp unify_all_types([]), do: {:ok, VarGen.fresh_type_var(), Substitution.empty()}
+  defp unify_all_types([single]), do: {:ok, single, Substitution.empty()}
+
+  defp unify_all_types([first | rest]) do
+    Enum.reduce_while(rest, {:ok, first, Substitution.empty()}, fn type,
+                                                                   {:ok, acc_type, acc_subst} ->
+      case Unification.unify(acc_type, type) do
+        {:ok, new_subst} ->
+          unified = Substitution.apply_subst(new_subst, acc_type)
+          final_subst = Substitution.compose(acc_subst, new_subst)
+          {:cont, {:ok, unified, final_subst}}
+
+        {:error, _} = error ->
+          {:halt, error}
+      end
+    end)
   end
 
   # Handle blocks
   defp handle_block([], _context, _mode, _expected) do
-    {:ok, :atom, Core.empty_effect(), Substitution.empty()}  # Empty block returns nil
+    # Empty block returns nil
+    {:ok, :atom, Core.empty_effect(), Substitution.empty()}
   end
 
   defp handle_block([expr], context, mode, expected) do
@@ -728,10 +980,11 @@ defmodule Litmus.Inference.Bidirectional do
     case expected_type do
       {:tuple, expected_types} when length(expected_types) == length(elements) ->
         # Check each element
-        check_results = Enum.zip(elements, expected_types)
-                        |> Enum.map(fn {elem, exp_type} ->
-                          check(elem, exp_type, expected_effect, context)
-                        end)
+        check_results =
+          Enum.zip(elements, expected_types)
+          |> Enum.map(fn {elem, exp_type} ->
+            check(elem, exp_type, expected_effect, context)
+          end)
 
         case Enum.find(check_results, &match?({:error, _}, &1)) do
           {:error, _} = error ->
@@ -762,8 +1015,11 @@ defmodule Litmus.Inference.Bidirectional do
             # Unify element types
             with {:ok, elem_subst} <- Unification.unify(head_type, tail_elem_type) do
               combined_effect = Effects.combine_effects(head_effect, tail_effect)
-              combined_subst = [head_subst, tail_subst, elem_subst]
-                               |> Enum.reduce(Substitution.empty(), &Substitution.compose/2)
+
+              combined_subst =
+                [head_subst, tail_subst, elem_subst]
+                |> Enum.reduce(Substitution.empty(), &Substitution.compose/2)
+
               unified_type = Substitution.apply_subst(combined_subst, head_type)
               {:ok, {:list, unified_type}, combined_effect, combined_subst}
             end
@@ -806,14 +1062,16 @@ defmodule Litmus.Inference.Bidirectional do
   # Handle binary construction (string interpolation)
   defp handle_binary(segments, context, :synthesis, _expected) do
     # Analyze each segment for effects
-    results = Enum.map(segments, fn segment ->
-      case segment do
-        {:"::", _, [value, _type]} ->
-          synthesize(value, context)
-        value ->
-          synthesize(value, context)
-      end
-    end)
+    results =
+      Enum.map(segments, fn segment ->
+        case segment do
+          {:"::", _, [value, _type]} ->
+            synthesize(value, context)
+
+          value ->
+            synthesize(value, context)
+        end
+      end)
 
     # Check if any segment failed
     case Enum.find(results, &match?({:error, _}, &1)) do
@@ -866,19 +1124,21 @@ defmodule Litmus.Inference.Bidirectional do
 
   defp instantiate_type({:forall, vars, body}) do
     # Replace quantified variables with fresh ones
-    fresh_vars = Enum.map(vars, fn
-      {:type_var, _} -> VarGen.fresh_type_var()
-      {:effect_var, _} -> VarGen.fresh_effect_var()
-    end)
+    fresh_vars =
+      Enum.map(vars, fn
+        {:type_var, _} -> VarGen.fresh_type_var()
+        {:effect_var, _} -> VarGen.fresh_effect_var()
+      end)
 
     subst = Enum.zip(vars, fresh_vars) |> Enum.into(%{})
     instantiated = Substitution.apply_subst(subst, body)
 
     # Extract effect if it's a function type
-    effect = case instantiated do
-      {:function, _, eff, _} -> eff
-      _ -> Core.empty_effect()
-    end
+    effect =
+      case instantiated do
+        {:function, _, eff, _} -> eff
+        _ -> Core.empty_effect()
+      end
 
     {instantiated, effect}
   end
@@ -902,7 +1162,8 @@ defmodule Litmus.Inference.Bidirectional do
     # Try to remove prefix from effect
     case Effects.combine_effects(prefix, Core.empty_effect()) do
       ^effect -> Core.empty_effect()
-      _ -> effect  # Can't remove, return as is
+      # Can't remove, return as is
+      _ -> effect
     end
   end
 end

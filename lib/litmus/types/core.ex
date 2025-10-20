@@ -21,40 +21,57 @@ defmodule Litmus.Types.Core do
 
   # Basic types
   @type primitive_type ::
-    :int | :float | :string | :bool | :atom | :pid | :reference | :any
+          :int | :float | :string | :bool | :atom | :pid | :reference | :any
 
   # Type definitions
   @type elixir_type ::
-    primitive_type() |
-    type_var() |
-    {:function, elixir_type(), effect_type(), elixir_type()} |
-    {:tuple, list(elixir_type())} |
-    {:list, elixir_type()} |
-    {:map, list({elixir_type(), elixir_type()})} |
-    {:union, list(elixir_type())} |
-    {:forall, list(type_var() | effect_var()), elixir_type()}
+          primitive_type()
+          | type_var()
+          | {:function, elixir_type(), effect_type(), elixir_type()}
+          | {:tuple, list(elixir_type())}
+          | {:list, elixir_type()}
+          | {:map, list({elixir_type(), elixir_type()})}
+          | {:union, list(elixir_type())}
+          | {:forall, list(type_var() | effect_var()), elixir_type()}
 
   # Effect types using row polymorphism
+  # No effects
   @type effect_label ::
-    :pure |           # No effects
-    :exn |            # Can raise exceptions
-    :io |             # I/O operations
-    :file |           # File system operations
-    :process |        # Process operations (spawn, send, receive)
-    :state |          # Stateful operations
-    :nif |            # Native implemented functions
-    :network |        # Network operations
-    :ets |            # ETS table operations
-    :time |           # Time-dependent operations
-    :random |         # Random number generation
-    :unknown          # Unknown effect (for gradual typing)
+          :pure
+          # Can raise exceptions
+          | :exn
+          # I/O operations
+          | :io
+          # File system operations
+          | :file
+          # Process operations (spawn, send, receive)
+          | :process
+          # Stateful operations
+          | :state
+          # Native implemented functions
+          | :nif
+          # Network operations
+          | :network
+          # ETS table operations
+          | :ets
+          # Time-dependent operations
+          | :time
+          # Random number generation
+          | :random
+          # Unknown effect (for gradual typing)
+          | :unknown
 
+  # ⟨⟩ - pure
   @type effect_type ::
-    {:effect_empty} |                                    # ⟨⟩ - pure
-    {:effect_label, effect_label()} |                   # ⟨l⟩ - single effect
-    {:effect_row, effect_label(), effect_type()} |      # ⟨l | ε⟩ - row extension
-    effect_var() |                                      # μ - effect variable
-    {:effect_unknown}                                    # ¿ - unknown (gradual)
+          {:effect_empty}
+          # ⟨l⟩ - single effect
+          | {:effect_label, effect_label()}
+          # ⟨l | ε⟩ - row extension
+          | {:effect_row, effect_label(), effect_type()}
+          # μ - effect variable
+          | effect_var()
+          # ¿ - unknown (gradual)
+          | {:effect_unknown}
 
   @doc """
   Creates an empty effect (pure).
@@ -134,27 +151,35 @@ defmodule Litmus.Types.Core do
 
   defp contains_variables?({:type_var, _}), do: true
   defp contains_variables?({:effect_var, _}), do: true
+
   defp contains_variables?({:function, arg, effect, ret}) do
     contains_variables?(arg) or contains_variables?(effect) or contains_variables?(ret)
   end
+
   defp contains_variables?({:tuple, types}) do
     Enum.any?(types, &contains_variables?/1)
   end
+
   defp contains_variables?({:list, type}) do
     contains_variables?(type)
   end
+
   defp contains_variables?({:map, pairs}) do
     Enum.any?(pairs, fn {k, v} -> contains_variables?(k) or contains_variables?(v) end)
   end
+
   defp contains_variables?({:union, types}) do
     Enum.any?(types, &contains_variables?/1)
   end
+
   defp contains_variables?({:forall, _, body}) do
     contains_variables?(body)
   end
+
   defp contains_variables?({:effect_row, _, tail}) do
     contains_variables?(tail)
   end
+
   defp contains_variables?(_), do: false
 
   @doc """
@@ -204,11 +229,13 @@ defmodule Litmus.Types.Core do
         |> Enum.reduce(MapSet.new(), &MapSet.union/2)
 
       {:forall, vars, body} ->
-        new_bound = Enum.reduce(vars, bound, fn
-          {:type_var, name}, acc -> MapSet.put(acc, name)
-          {:effect_var, name}, acc -> MapSet.put(acc, name)
-          _, acc -> acc
-        end)
+        new_bound =
+          Enum.reduce(vars, bound, fn
+            {:type_var, name}, acc -> MapSet.put(acc, name)
+            {:effect_var, name}, acc -> MapSet.put(acc, name)
+            _, acc -> acc
+          end)
+
         free_variables(body, new_bound)
 
       {:effect_row, _label, tail} ->
@@ -224,11 +251,12 @@ defmodule Litmus.Types.Core do
 
   Returns one of:
   - `:p` - pure (no effects)
-  - `:d` - dependent (reads from execution environment)
+  - `{:d, [MFA list]}` - dependent (reads from execution environment) with specific function tracking
+  - `:d` - dependent (old-style, for compatibility)
   - `:l` - lambda (effects depend on passed lambdas)
   - `:n` - nif
   - `{:e, [exception_types]}` - can raise exceptions
-  - `:s` - side effects (io, file, process, network, state, etc.)
+  - `{:s, [MFA list]}` - side effects with specific function tracking
   - `:u` - unknown
 
   ## Examples
@@ -242,12 +270,20 @@ defmodule Litmus.Types.Core do
       {:e, [:exn]}
 
       iex> alias Litmus.Types.Core
-      iex> Core.to_compact_effect({:effect_label, :file})
-      :s
+      iex> Core.to_compact_effect({:s, ["File.read/1"]})
+      {:s, ["File.read/1"]}
 
       iex> alias Litmus.Types.Core
-      iex> Core.to_compact_effect({:effect_row, :file, {:effect_label, :io}})
-      :s
+      iex> Core.to_compact_effect({:s, ["File.read/1", "IO.puts/1"]})
+      {:s, ["File.read/1", "IO.puts/1"]}
+
+      iex> alias Litmus.Types.Core
+      iex> Core.to_compact_effect({:d, ["System.get_env/1"]})
+      {:d, ["System.get_env/1"]}
+
+      iex> alias Litmus.Types.Core
+      iex> Core.to_compact_effect({:d, ["System.get_env/1", "Process.get/1"]})
+      {:d, ["System.get_env/1", "Process.get/1"]}
   """
   def to_compact_effect(effect) do
     labels = extract_effect_labels(effect)
@@ -261,11 +297,33 @@ defmodule Litmus.Types.Core do
       :nif in labels ->
         :n
 
-      # Contains unknown effect
+      # Has specific side effects tracked with MFAs (prioritize over unknown)
+      has_side_effect_mfas?(labels) ->
+        # Extract all side effect MFAs and combine them
+        mfas =
+          Enum.flat_map(labels, fn
+            {:s, list} -> list
+            _ -> []
+          end)
+
+        {:s, mfas}
+
+      # Has specific dependent effects tracked with MFAs (prioritize over unknown)
+      has_dependent_effect_mfas?(labels) ->
+        # Extract all dependent effect MFAs and combine them
+        mfas =
+          Enum.flat_map(labels, fn
+            {:d, list} -> list
+            _ -> []
+          end)
+
+        {:d, mfas}
+
+      # Contains unknown effect (only if no concrete tracked effects above)
       :unknown in labels ->
         :u
 
-      # Has side effects (io, file, process, network, state, etc.)
+      # Has old-style side effects (shouldn't happen with new code, but kept for compatibility)
       has_side_effects?(labels) ->
         :s
 
@@ -291,7 +349,23 @@ defmodule Litmus.Types.Core do
     end
   end
 
-  # Check if labels contain any side-effecting operations
+  # Check if labels contain side effects with specific MFAs
+  defp has_side_effect_mfas?(labels) do
+    Enum.any?(labels, fn
+      {:s, _list} -> true
+      _ -> false
+    end)
+  end
+
+  # Check if labels contain dependent effects with specific MFAs
+  defp has_dependent_effect_mfas?(labels) do
+    Enum.any?(labels, fn
+      {:d, _list} -> true
+      _ -> false
+    end)
+  end
+
+  # Check if labels contain any old-style side-effecting operations (for compatibility)
   defp has_side_effects?(labels) do
     side_effect_labels = [:io, :file, :process, :network, :state, :ets, :time, :random]
     Enum.any?(labels, fn label -> label in side_effect_labels end)
@@ -301,6 +375,8 @@ defmodule Litmus.Types.Core do
   Extracts all effect labels from an effect type.
 
   Returns a list of effect labels in the order they appear in the effect row.
+  Side effects are returned as {:s, [MFA list]} tuples.
+  Dependent effects are returned as {:d, [MFA list]} tuples.
   """
   def extract_effect_labels(effect) do
     case effect do
@@ -309,6 +385,14 @@ defmodule Litmus.Types.Core do
 
       {:effect_label, label} ->
         [label]
+
+      {:s, _list} = side_effect ->
+        # Side effects with specific MFAs
+        [side_effect]
+
+      {:d, _list} = dependent_effect ->
+        # Dependent effects with specific MFAs
+        [dependent_effect]
 
       {:effect_row, label, tail} ->
         [label | extract_effect_labels(tail)]
@@ -324,5 +408,4 @@ defmodule Litmus.Types.Core do
         [:unknown]
     end
   end
-
 end

@@ -12,11 +12,14 @@ defmodule RegressionAnalysisTest do
     case ASTWalker.analyze_ast(ast) do
       {:ok, result} ->
         mfa = {module, function, arity}
+
         case Map.get(result.functions, mfa) do
           nil -> {:error, :function_not_found}
           func_analysis -> {:ok, func_analysis}
         end
-      error -> error
+
+      error ->
+        error
     end
   end
 
@@ -25,9 +28,12 @@ defmodule RegressionAnalysisTest do
     case get_function_effect(module, function, arity) do
       {:ok, func_analysis} ->
         compact = Core.to_compact_effect(func_analysis.effect)
+
         assert compact == expected_compact,
-          "Expected #{function}/#{arity} to have effect #{inspect(expected_compact)}, got #{inspect(compact)}"
+               "Expected #{function}/#{arity} to have effect #{inspect(expected_compact)}, got #{inspect(compact)}"
+
         func_analysis
+
       {:error, reason} ->
         flunk("Failed to analyze #{function}/#{arity}: #{inspect(reason)}")
     end
@@ -39,14 +45,21 @@ defmodule RegressionAnalysisTest do
     end
 
     test "bug_1_call_with_pure_lambda/0 calls higher-order function" do
-      # When analyzed standalone, local function calls show as unknown
-      func = assert_effect_type(Support.RegressionTest, :bug_1_call_with_pure_lambda, 0, :u)
+      # Now resolved: local functions are added to runtime cache during analysis
+      func = assert_effect_type(Support.RegressionTest, :bug_1_call_with_pure_lambda, 0, :p)
       assert {Kernel, :bug_1_higher_order_function, 1} in func.calls
     end
 
     test "bug_1_call_with_effectful_lambda/0 calls higher-order function with effects" do
-      # When analyzed standalone, local function calls show as unknown
-      func = assert_effect_type(Support.RegressionTest, :bug_1_call_with_effectful_lambda, 0, :u)
+      # Now resolved: local functions are added to runtime cache during analysis
+      func =
+        assert_effect_type(
+          Support.RegressionTest,
+          :bug_1_call_with_effectful_lambda,
+          0,
+          {:s, ["IO.puts/1"]}
+        )
+
       assert {Kernel, :bug_1_higher_order_function, 1} in func.calls
       assert {IO, :puts, 1} in func.calls
     end
@@ -54,7 +67,14 @@ defmodule RegressionAnalysisTest do
 
   describe "Bug #2: Block Expressions" do
     test "bug_2_log_and_save/2 is effectful (not unknown)" do
-      func = assert_effect_type(Support.RegressionTest, :bug_2_log_and_save, 2, :s)
+      func =
+        assert_effect_type(
+          Support.RegressionTest,
+          :bug_2_log_and_save,
+          2,
+          {:s, ["IO.puts/1", "File.write!/2"]}
+        )
+
       assert {IO, :puts, 1} in func.calls
       assert {File, :write!, 2} in func.calls
     end
@@ -72,12 +92,26 @@ defmodule RegressionAnalysisTest do
 
   describe "Bug #4: Exception Functions" do
     test "bug_4_exception_with_module_alias/0 has exception effect (not unknown)" do
-      func = assert_effect_type(Support.RegressionTest, :bug_4_exception_with_module_alias, 0, {:e, [:exn]})
+      func =
+        assert_effect_type(
+          Support.RegressionTest,
+          :bug_4_exception_with_module_alias,
+          0,
+          {:e, [:exn]}
+        )
+
       assert {Kernel, :raise, 2} in func.calls
     end
 
     test "bug_4_exception_runtime_error/0 has exception effect" do
-      func = assert_effect_type(Support.RegressionTest, :bug_4_exception_runtime_error, 0, {:e, [:exn]})
+      func =
+        assert_effect_type(
+          Support.RegressionTest,
+          :bug_4_exception_runtime_error,
+          0,
+          {:e, [:exn]}
+        )
+
       assert {Kernel, :raise, 2} in func.calls
     end
   end
@@ -111,7 +145,14 @@ defmodule RegressionAnalysisTest do
     end
 
     test "bug_8_reduce_with_effectful_lambda/1 is effectful" do
-      func = assert_effect_type(Support.RegressionTest, :bug_8_reduce_with_effectful_lambda, 1, :s)
+      func =
+        assert_effect_type(
+          Support.RegressionTest,
+          :bug_8_reduce_with_effectful_lambda,
+          1,
+          {:s, ["IO.puts/1"]}
+        )
+
       assert {Enum, :reduce, 3} in func.calls
       assert {IO, :puts, 1} in func.calls
     end
@@ -123,14 +164,21 @@ defmodule RegressionAnalysisTest do
     end
 
     test "integration_test_2_pure/0 calls integration_test_2" do
-      # When analyzed standalone, local function calls show as unknown
-      func = assert_effect_type(Support.RegressionTest, :integration_test_2_pure, 0, :u)
+      # Now resolved: local functions are added to runtime cache during analysis
+      func = assert_effect_type(Support.RegressionTest, :integration_test_2_pure, 0, :p)
       assert {Kernel, :integration_test_2, 2} in func.calls
     end
 
     test "integration_test_2_effectful/0 calls integration_test_2 with effects" do
-      # When analyzed standalone, local function calls show as unknown
-      func = assert_effect_type(Support.RegressionTest, :integration_test_2_effectful, 0, :u)
+      # Now resolved: local functions are added to runtime cache during analysis
+      func =
+        assert_effect_type(
+          Support.RegressionTest,
+          :integration_test_2_effectful,
+          0,
+          {:s, ["IO.puts/1"]}
+        )
+
       assert {Kernel, :integration_test_2, 2} in func.calls
       assert {IO, :puts, 1} in func.calls
     end

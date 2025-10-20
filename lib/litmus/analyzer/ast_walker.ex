@@ -10,31 +10,32 @@ defmodule Litmus.Analyzer.ASTWalker do
   alias Litmus.Inference.{Bidirectional, Context}
   alias Litmus.Types.Core
   alias Litmus.Analyzer.EffectTracker
+  alias Litmus.Effects.Registry
   alias Litmus.Formatter
 
   @type analysis_result :: %{
-    module: module(),
-    functions: %{mfa() => function_analysis()},
-    types: %{mfa() => Core.elixir_type()},
-    effects: %{mfa() => Core.effect_type()},
-    errors: list(analysis_error())
-  }
+          module: module(),
+          functions: %{mfa() => function_analysis()},
+          types: %{mfa() => Core.elixir_type()},
+          effects: %{mfa() => Core.effect_type()},
+          errors: list(analysis_error())
+        }
 
   @type function_analysis :: %{
-    type: Core.elixir_type(),
-    effect: Core.effect_type(),
-    params: list(Core.elixir_type()),
-    return_type: Core.elixir_type(),
-    calls: list(mfa()),
-    line: non_neg_integer()
-  }
+          type: Core.elixir_type(),
+          effect: Core.effect_type(),
+          params: list(Core.elixir_type()),
+          return_type: Core.elixir_type(),
+          calls: list(mfa()),
+          line: non_neg_integer()
+        }
 
   @type analysis_error :: %{
-    type: :type_error | :effect_error | :unknown_function,
-    message: String.t(),
-    location: {module(), atom(), non_neg_integer()},
-    details: map()
-  }
+          type: :type_error | :effect_error | :unknown_function,
+          message: String.t(),
+          location: {module(), atom(), non_neg_integer()},
+          details: map()
+        }
 
   @doc """
   Analyzes a module from a .beam file by extracting its AST.
@@ -106,9 +107,10 @@ defmodule Litmus.Analyzer.ASTWalker do
     context = Context.with_stdlib()
 
     # Analyze each definition
-    result = Enum.reduce(definitions, {initial_result, context}, fn def_ast, {acc, ctx} ->
-      analyze_definition(def_ast, acc, ctx)
-    end)
+    result =
+      Enum.reduce(definitions, {initial_result, context}, fn def_ast, {acc, ctx} ->
+        analyze_definition(def_ast, acc, ctx)
+      end)
 
     case result do
       {final_result, _final_context} ->
@@ -130,6 +132,32 @@ defmodule Litmus.Analyzer.ASTWalker do
 
   defp analyze_definition({:defp, meta, [signature, [do: body]]}, result, context) do
     analyze_function(:defp, meta, signature, body, result, context)
+  end
+
+  defp analyze_definition({:defmodule, _, [module_name, [do: module_body]]}, result, context) do
+    # Handle nested modules
+    nested_module_name = extract_module_name(module_name)
+    # Make it fully qualified relative to parent module
+    full_module_name = Module.concat([result.module, nested_module_name])
+
+    # Analyze the nested module
+    case analyze_module(full_module_name, module_body) do
+      {:ok, nested_result} ->
+        # Merge nested module's functions into parent result
+        merged_result = %{
+          result
+          | functions: Map.merge(result.functions, nested_result.functions),
+            types: Map.merge(result.types, nested_result.types),
+            effects: Map.merge(result.effects, nested_result.effects),
+            errors: result.errors ++ nested_result.errors
+        }
+
+        {merged_result, context}
+
+      {:error, _reason} ->
+        # Keep original result if nested analysis fails
+        {result, context}
+    end
   end
 
   defp analyze_definition({:@, _, [{:spec, _, _spec}]}, result, context) do
@@ -161,8 +189,8 @@ defmodule Litmus.Analyzer.ASTWalker do
         # Add parameters to context
         {param_types, param_context} = add_params_to_context(params, context)
 
-        # Expand pipes in the body before analysis
-        expanded_body = expand_pipes(body)
+        # Expand ALL macros in the body before analysis (including pipes, string concat, etc.)
+        expanded_body = expand_macros(body, module)
 
         # Analyze function body
         case Bidirectional.synthesize(expanded_body, param_context) do
@@ -192,10 +220,16 @@ defmodule Litmus.Analyzer.ASTWalker do
             }
 
             # Update result
-            updated_result = result
-                             |> Map.update!(:functions, &Map.put(&1, mfa, func_analysis))
-                             |> Map.update!(:types, &Map.put(&1, mfa, fun_type))
-                             |> Map.update!(:effects, &Map.put(&1, mfa, final_effect))
+            updated_result =
+              result
+              |> Map.update!(:functions, &Map.put(&1, mfa, func_analysis))
+              |> Map.update!(:types, &Map.put(&1, mfa, fun_type))
+              |> Map.update!(:effects, &Map.put(&1, mfa, final_effect))
+
+            # Add function to runtime cache for cross-function resolution
+            # This allows later functions in the same module to resolve calls to this function
+            compact_effect = Core.to_compact_effect(final_effect)
+            Registry.add_to_runtime_cache(mfa, compact_effect)
 
             # Add function to context for recursive calls
             new_context = Context.add(context, name, fun_type)
@@ -256,19 +290,20 @@ defmodule Litmus.Analyzer.ASTWalker do
 
   # Add parameters to typing context
   defp add_params_to_context(params, context) do
-    {param_types, new_context} = Enum.reduce(params, {[], context}, fn param, {types, ctx} ->
-      case param do
-        {name, _, nil} when is_atom(name) ->
-          # Create fresh type variable for parameter
-          param_type = Bidirectional.VarGen.fresh_type_var()
-          {[param_type | types], Context.add(ctx, name, param_type)}
+    {param_types, new_context} =
+      Enum.reduce(params, {[], context}, fn param, {types, ctx} ->
+        case param do
+          {name, _, nil} when is_atom(name) ->
+            # Create fresh type variable for parameter
+            param_type = Bidirectional.VarGen.fresh_type_var()
+            {[param_type | types], Context.add(ctx, name, param_type)}
 
-        _ ->
-          # Complex pattern - use fresh variable
-          param_type = Bidirectional.VarGen.fresh_type_var()
-          {[param_type | types], ctx}
-      end
-    end)
+          _ ->
+            # Complex pattern - use fresh variable
+            param_type = Bidirectional.VarGen.fresh_type_var()
+            {[param_type | types], ctx}
+        end
+      end)
 
     {Enum.reverse(param_types), new_context}
   end
@@ -290,18 +325,16 @@ defmodule Litmus.Analyzer.ASTWalker do
   # Converts effect variables to lambda-dependent when appropriate
   defp classify_effect(effect, param_types) do
     # Check if any parameters are functions
-    has_function_params = Enum.any?(param_types, fn
-      {:function, _, _, _} -> true
-      {:type_var, _} -> true  # Could be a function
-      _ -> false
-    end)
+    has_function_params =
+      Enum.any?(param_types, fn
+        {:function, _, _, _} -> true
+        # Could be a function
+        {:type_var, _} -> true
+        _ -> false
+      end)
 
     # Check if effect contains only variables (no concrete effects)
-    only_vars = case effect do
-      {:effect_var, _} -> true
-      {:effect_empty} -> false
-      _ -> false
-    end
+    only_vars = only_effect_variables?(effect)
 
     # If function has function parameters and effect is just variables,
     # mark it as lambda-dependent
@@ -311,6 +344,20 @@ defmodule Litmus.Analyzer.ASTWalker do
       effect
     end
   end
+
+  # Check if an effect contains only effect variables (no concrete effects)
+  defp only_effect_variables?({:effect_var, _}), do: true
+  defp only_effect_variables?({:effect_empty}), do: false
+
+  defp only_effect_variables?({:effect_row, label, tail}) do
+    # Check if label is a variable and tail is also only variables
+    case label do
+      {:effect_var, _} -> only_effect_variables?(tail)
+      _ -> false
+    end
+  end
+
+  defp only_effect_variables?(_), do: false
 
   # Extract module name from AST
   defp extract_module_name({:__aliases__, _, parts}) do
@@ -378,23 +425,25 @@ defmodule Litmus.Analyzer.ASTWalker do
   Analyzes multiple files in parallel.
   """
   def analyze_files(paths) when is_list(paths) do
-    tasks = Enum.map(paths, fn path ->
-      Task.async(fn -> analyze_file(path) end)
-    end)
+    tasks =
+      Enum.map(paths, fn path ->
+        Task.async(fn -> analyze_file(path) end)
+      end)
 
     results = Task.await_many(tasks, :infinity)
 
     # Combine results
-    combined = Enum.reduce(results, {:ok, []}, fn
-      {:ok, analysis}, {:ok, acc} ->
-        {:ok, [analysis | acc]}
+    combined =
+      Enum.reduce(results, {:ok, []}, fn
+        {:ok, analysis}, {:ok, acc} ->
+          {:ok, [analysis | acc]}
 
-      {:error, _} = error, _ ->
-        error
+        {:error, _} = error, _ ->
+          error
 
-      _, error ->
-        error
-    end)
+        _, error ->
+          error
+      end)
 
     case combined do
       {:ok, analyses} ->
@@ -411,25 +460,27 @@ defmodule Litmus.Analyzer.ASTWalker do
   def format_results(%{module: module, functions: functions, errors: errors}) do
     header = "=== Analysis Results for #{module} ===\n"
 
-    functions_str = functions
-                    |> Enum.map(fn {{_m, f, a}, analysis} ->
-                      type_str = Formatter.format_type(analysis.type)
-                      effect_str = Formatter.format_effect(analysis.effect)
-                      visibility = if analysis[:visibility] == :defp, do: " (private)", else: ""
-                      "  #{f}/#{a}#{visibility}:\n    Type: #{type_str}\n    Effect: #{effect_str}"
-                    end)
-                    |> Enum.join("\n\n")
-
-    errors_str = if Enum.empty?(errors) do
-      "  None"
-    else
-      errors
-      |> Enum.map(fn error ->
-        {mod, fun, line} = error.location
-        "  #{error.type} at #{mod}.#{fun}:#{line}\n    #{error.message}"
+    functions_str =
+      functions
+      |> Enum.map(fn {{_m, f, a}, analysis} ->
+        type_str = Formatter.format_type(analysis.type)
+        effect_str = Formatter.format_effect(analysis.effect)
+        visibility = if analysis[:visibility] == :defp, do: " (private)", else: ""
+        "  #{f}/#{a}#{visibility}:\n    Type: #{type_str}\n    Effect: #{effect_str}"
       end)
       |> Enum.join("\n\n")
-    end
+
+    errors_str =
+      if Enum.empty?(errors) do
+        "  None"
+      else
+        errors
+        |> Enum.map(fn error ->
+          {mod, fun, line} = error.location
+          "  #{error.type} at #{mod}.#{fun}:#{line}\n    #{error.message}"
+        end)
+        |> Enum.join("\n\n")
+      end
 
     """
     #{header}
@@ -442,37 +493,15 @@ defmodule Litmus.Analyzer.ASTWalker do
     """
   end
 
-  # Expand only pipe operators in the AST
-  # We use Macro.prewalk to recursively expand pipes without expanding other macros
-  defp expand_pipes(ast) do
-    Macro.prewalk(ast, fn
-      {:|>, _, [left, right]} ->
-        # Macro.prewalk already handles recursion, so left and right are already processed
-        # Just expand this pipe
-        case right do
-          # Remote call: Module.func(args) becomes Module.func(left, args)
-          {{:., meta1, [module, function]}, meta2, args} ->
-            {{:., meta1, [module, function]}, meta2, [left | args]}
+  # Expand ALL macros in the AST using Elixir's Macro.expand
+  # This includes pipes, string concatenation, and all other macros
+  defp expand_macros(ast, module) do
+    # Create a minimal environment for macro expansion
+    env = %{__ENV__ | module: module, file: "nofile", line: 1}
 
-          # Local call: func(args) becomes func(left, args)
-          {function, meta, args} when is_atom(function) and is_list(args) ->
-            {function, meta, [left | args]}
-
-          # Function capture: &Module.func/arity becomes Module.func(left)
-          {:&, _, [{:/, _, [{{:., meta1, [module, function]}, meta2, []}, _arity]}]} ->
-            {{:., meta1, [module, function]}, meta2, [left]}
-
-          # Operator capture: &+/2 becomes +(left)
-          {:&, _, [{:/, _, [{operator, meta, _}, _arity]}]} when is_atom(operator) ->
-            {operator, meta, [left]}
-
-          # Anything else - call it with left as argument
-          _ ->
-            {right, [], [left]}
-        end
-
-      node ->
-        node
+    # Recursively expand all macros in the AST
+    Macro.prewalk(ast, fn node ->
+      Macro.expand(node, env)
     end)
   end
 end

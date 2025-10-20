@@ -50,21 +50,20 @@ defmodule Litmus.Types.Substitution do
       {:type_var, _} = var ->
         case Map.get(subst, var) do
           nil -> var
-          substituted -> apply_subst(subst, substituted)  # Apply transitively
+          # Apply transitively
+          substituted -> apply_subst(subst, substituted)
         end
 
       {:effect_var, _} = var ->
         case Map.get(subst, var) do
           nil -> var
-          substituted -> apply_subst(subst, substituted)  # Apply transitively
+          # Apply transitively
+          substituted -> apply_subst(subst, substituted)
         end
 
       # Compound types - apply recursively
       {:function, arg, effect, ret} ->
-        {:function,
-         apply_subst(subst, arg),
-         apply_subst(subst, effect),
-         apply_subst(subst, ret)}
+        {:function, apply_subst(subst, arg), apply_subst(subst, effect), apply_subst(subst, ret)}
 
       {:tuple, types} ->
         {:tuple, Enum.map(types, &apply_subst(subst, &1))}
@@ -179,6 +178,7 @@ defmodule Litmus.Types.Substitution do
     else
       # Apply substitution to its own values until fixed point
       new_subst = Map.new(subst, fn {var, type} -> {var, apply_subst(subst, type)} end)
+
       if new_subst == subst do
         subst
       else

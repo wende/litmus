@@ -20,7 +20,7 @@ defmodule Support.EdgeCasesTest do
   A higher-order function that takes a function parameter and calls it.
   Should be classified as lambda-dependent (l), not unknown (u).
   """
-  def higher_order_pure(func) do
+  def higher_order_simple(func) do
     func.(10)
   end
 
@@ -46,7 +46,7 @@ defmodule Support.EdgeCasesTest do
   The overall effect should be pure, not lambda-dependent.
   """
   def call_higher_order_with_pure_lambda do
-    higher_order_pure(fn x -> x * 2 end)
+    higher_order_simple(fn x -> x * 2 end)
   end
 
   @doc """
@@ -54,7 +54,7 @@ defmodule Support.EdgeCasesTest do
   The overall effect should be effectful (s), not lambda-dependent.
   """
   def call_higher_order_with_effectful_lambda do
-    higher_order_pure(fn x ->
+    higher_order_simple(fn x ->
       IO.puts("Processing: #{x}")
       x * 2
     end)

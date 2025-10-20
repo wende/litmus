@@ -25,12 +25,13 @@ defmodule Litmus.Analyzer.EffectTracker do
     # First expand pipes so we get the actual calls
     expanded_ast = expand_pipes(ast)
 
-    {_ast, calls} = Macro.prewalk(expanded_ast, [], fn node, acc ->
-      case extract_call(node) do
-        nil -> {node, acc}
-        call -> {node, [call | acc]}
-      end
-    end)
+    {_ast, calls} =
+      Macro.prewalk(expanded_ast, [], fn node, acc ->
+        case extract_call(node) do
+          nil -> {node, acc}
+          call -> {node, [call | acc]}
+        end
+      end)
 
     calls
     |> Enum.reverse()
@@ -45,12 +46,16 @@ defmodule Litmus.Analyzer.EffectTracker do
         case right do
           {{:., meta1, [module, function]}, meta2, args} ->
             {{:., meta1, [module, function]}, meta2, [left | args]}
+
           {function, meta, args} when is_atom(function) and is_list(args) ->
             {function, meta, [left | args]}
+
           {:&, _, [{:/, _, [{{:., meta1, [module, function]}, meta2, []}, _arity]}]} ->
             {{:., meta1, [module, function]}, meta2, [left]}
+
           {:&, _, [{:/, _, [{operator, meta, _}, _arity]}]} when is_atom(operator) ->
             {operator, meta, [left]}
+
           _ ->
             {right, [], [left]}
         end
@@ -123,12 +128,13 @@ defmodule Litmus.Analyzer.EffectTracker do
   Returns an annotated AST where each node has effect information attached.
   """
   def annotate_effects(ast) do
-    {annotated, _} = Macro.prewalk(ast, %{}, fn node, context ->
-      effect = node_effect(node, context)
-      annotated_node = add_effect_metadata(node, effect)
-      new_context = update_context(context, node, effect)
-      {annotated_node, new_context}
-    end)
+    {annotated, _} =
+      Macro.prewalk(ast, %{}, fn node, context ->
+        effect = node_effect(node, context)
+        annotated_node = add_effect_metadata(node, effect)
+        new_context = update_context(context, node, effect)
+        {annotated_node, new_context}
+      end)
 
     annotated
   end
@@ -227,13 +233,14 @@ defmodule Litmus.Analyzer.EffectTracker do
   Returns a list of AST nodes that have side effects.
   """
   def find_effectful_nodes(ast) do
-    {_ast, nodes} = Macro.prewalk(ast, [], fn node, acc ->
-      if is_effectful_node?(node) do
-        {node, [node | acc]}
-      else
-        {node, acc}
-      end
-    end)
+    {_ast, nodes} =
+      Macro.prewalk(ast, [], fn node, acc ->
+        if is_effectful_node?(node) do
+          {node, [node | acc]}
+        else
+          {node, acc}
+        end
+      end)
 
     Enum.reverse(nodes)
   end

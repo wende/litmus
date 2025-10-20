@@ -123,15 +123,20 @@ defmodule InferTest do
 
   def mixed_lambda_and_capture(list) do
     list
-    |> Enum.map(fn x -> x * 2 end)  # Pure lambda
-    |> Enum.filter(&(&1 > 10))       # Pure capture
-    |> Enum.map(&Integer.to_string/1) # Pure capture
+    # Pure lambda
+    |> Enum.map(fn x -> x * 2 end)
+    # Pure capture
+    |> Enum.filter(&(&1 > 10))
+    # Pure capture
+    |> Enum.map(&Integer.to_string/1)
   end
 
   def mixed_with_effectful_lambda(list) do
     list
-    |> Enum.map(&String.upcase/1)    # Pure capture
-    |> Enum.each(fn x ->              # Effectful lambda
+    # Pure capture
+    |> Enum.map(&String.upcase/1)
+    # Effectful lambda
+    |> Enum.each(fn x ->
       IO.puts("Result: #{x}")
     end)
   end

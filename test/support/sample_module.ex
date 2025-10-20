@@ -66,11 +66,13 @@ defmodule Support.SampleModule do
 
   # Exception effects
   def get_first(list) do
-    hd(list)  # Can raise ArgumentError
+    # Can raise ArgumentError
+    hd(list)
   end
 
   def divide(x, y) do
-    div(x, y)  # Can raise ArithmeticError
+    # Can raise ArithmeticError
+    div(x, y)
   end
 
   # Complex control flow
@@ -127,5 +129,4 @@ defmodule Support.SampleModule do
   def higher_order_function(func) do
     func.(10)
   end
-
 end

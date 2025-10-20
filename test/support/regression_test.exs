@@ -82,7 +82,8 @@ defmodule Support.RegressionTest do
   """
   def bug_2_exception_block(list) do
     x = List.first(list)
-    y = hd(list)  # Can raise
+    # Can raise
+    y = hd(list)
     x + y
   end
 
@@ -199,6 +200,7 @@ defmodule Support.RegressionTest do
 
   EXPECTED: Cross-module calls to test support modules should work correctly.
   """
+
   # This bug is more about infrastructure, but we can still document it
   # The fix ensures that modules like SampleModule are always in the cache
 
@@ -285,10 +287,13 @@ defmodule Support.RegressionTest do
   EXPECTED: Should be classified as effectful (s).
   """
   def integration_test_2_effectful do
-    integration_test_2(fn x ->
-      IO.puts("Processing: #{x}")
-      x * 2
-    end, 10)
+    integration_test_2(
+      fn x ->
+        IO.puts("Processing: #{x}")
+        x * 2
+      end,
+      10
+    )
   end
 
   @doc """
@@ -307,11 +312,12 @@ defmodule Support.RegressionTest do
     _y = 20
 
     # Higher-order with reduce (Bug #1, #8)
-    result = Enum.reduce(list_of_lists, 0, fn sublist, acc ->
-      # Exception (Bug #4)
-      first = hd(sublist)
-      acc + first
-    end)
+    result =
+      Enum.reduce(list_of_lists, 0, fn sublist, acc ->
+        # Exception (Bug #4)
+        first = hd(sublist)
+        acc + first
+      end)
 
     # Exception with module alias (Bug #4)
     if result < 0 do

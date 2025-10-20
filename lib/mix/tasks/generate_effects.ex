@@ -125,6 +125,26 @@ defmodule Mix.Tasks.GenerateEffects do
       Mix.shell().info("  • Unknown (u):       #{dep_counts.u}")
     end
 
+    # Build resolution mapping for stdlib (optional, can be enabled with a flag)
+    if include_stdlib do
+      Mix.shell().info("\n╔═══════════════════════════════════════════════════════╗")
+      Mix.shell().info("║     Building Resolution Mapping                       ║")
+      Mix.shell().info("╚═══════════════════════════════════════════════════════╝\n")
+
+      # Get stdlib modules
+      stdlib_modules = get_stdlib_modules()
+      Mix.shell().info("Found #{length(stdlib_modules)} stdlib modules")
+
+      # Build resolution mapping
+      resolution_mapping = Builder.build_resolution_mapping(stdlib_modules)
+
+      # Export resolution mapping
+      Builder.export_resolution_to_json(resolution_mapping, ".effects_resolution.json")
+
+      Mix.shell().info("\n✓ Resolution mapping saved to .effects_resolution.json")
+      Mix.shell().info("  Total resolutions: #{map_size(resolution_mapping)}")
+    end
+
     Mix.shell().info("\n╔═══════════════════════════════════════════════════════╗")
     Mix.shell().info("║     Complete                                          ║")
     Mix.shell().info("╚═══════════════════════════════════════════════════════╝\n")
@@ -178,5 +198,112 @@ defmodule Mix.Tasks.GenerateEffects do
 
   defp normalize_effect(:exn), do: :e
   defp normalize_effect(effect) when effect in [:p, :d, :l, :s, :e, :n, :u], do: effect
+  # Side effects with MFA list
+  defp normalize_effect({:s, _}), do: :s
+  # Dependent effects with MFA list
+  defp normalize_effect({:d, _}), do: :d
+  # Exceptions with types
+  defp normalize_effect({:e, _}), do: :e
   defp normalize_effect(_), do: :u
+
+  defp get_stdlib_modules do
+    # Elixir stdlib modules
+    elixir_stdlib = [
+      # Data structures
+      Enum,
+      Map,
+      List,
+      Tuple,
+      String,
+      Integer,
+      Float,
+      Atom,
+      Range,
+      Keyword,
+      MapSet,
+      Date,
+      Time,
+      DateTime,
+      NaiveDateTime,
+      Calendar,
+
+      # I/O and File operations
+      File,
+      IO,
+      Path,
+      StringIO,
+
+      # Process and concurrency
+      Agent,
+      Application,
+      GenServer,
+      Supervisor,
+      Task,
+      Process,
+      Port,
+      DynamicSupervisor,
+      PartitionSupervisor,
+      Registry,
+
+      # System operations
+      System,
+      Logger,
+      Code,
+      Node,
+
+      # Special modules
+      Kernel,
+      Module,
+      Macro,
+      Exception,
+      Protocol,
+      Inspect,
+
+      # Utilities
+      OptionParser,
+      URI,
+      Version,
+      Access,
+      Config
+    ]
+
+    # Erlang stdlib modules
+    erlang_stdlib = [
+      :erlang,
+      :lists,
+      :maps,
+      :sets,
+      :ordsets,
+      :orddict,
+      :gb_sets,
+      :gb_trees,
+      :queue,
+      :proplists,
+      :string,
+      :binary,
+      :unicode,
+      :re,
+      :file,
+      :filename,
+      :io,
+      :prim_file,
+      :inet,
+      :gen_tcp,
+      :gen_udp,
+      :ssl,
+      :gen_server,
+      :gen_event,
+      :supervisor,
+      :ets,
+      :dets,
+      :persistent_term,
+      :rand,
+      :random,
+      :os,
+      :code,
+      :logger
+    ]
+
+    elixir_stdlib ++ erlang_stdlib
+  end
 end

@@ -37,7 +37,8 @@ defmodule Litmus.Types.Unification do
 
     case {t1_subst, t2_subst} do
       # Identical types
-      {t, t} -> {:ok, subst}
+      {t, t} ->
+        {:ok, subst}
 
       # Type variable on left
       {{:type_var, _} = var, type} ->
@@ -115,7 +116,8 @@ defmodule Litmus.Types.Unification do
 
     case {e1_subst, e2_subst} do
       # Identical effects
-      {e, e} -> {:ok, subst}
+      {e, e} ->
+        {:ok, subst}
 
       # Effect variable on left
       {{:effect_var, _} = var, effect} ->
@@ -132,6 +134,30 @@ defmodule Litmus.Types.Unification do
       # Single labels
       {{:effect_label, l1}, {:effect_label, l2}} when l1 == l2 ->
         {:ok, subst}
+
+      # Side effects - two side effect lists
+      {{:s, list1}, {:s, list2}} ->
+        # Side effects unify if they have the same MFAs (order doesn't matter)
+        sorted1 = Enum.sort(list1)
+        sorted2 = Enum.sort(list2)
+
+        if sorted1 == sorted2 do
+          {:ok, subst}
+        else
+          {:error, {:cannot_unify_side_effects, {:s, list1}, {:s, list2}}}
+        end
+
+      # Dependent effects - two dependent effect lists
+      {{:d, list1}, {:d, list2}} ->
+        # Dependent effects unify if they have the same MFAs (order doesn't matter)
+        sorted1 = Enum.sort(list1)
+        sorted2 = Enum.sort(list2)
+
+        if sorted1 == sorted2 do
+          {:ok, subst}
+        else
+          {:error, {:cannot_unify_dependent_effects, {:d, list1}, {:d, list2}}}
+        end
 
       # Row with empty
       {{:effect_row, _l, _tail}, {:effect_empty}} ->
@@ -153,10 +179,12 @@ defmodule Litmus.Types.Unification do
 
       # Unknown effect
       {{:effect_unknown}, _} ->
-        {:ok, subst}  # Unknown unifies with anything
+        # Unknown unifies with anything
+        {:ok, subst}
 
       {_, {:effect_unknown}} ->
-        {:ok, subst}  # Unknown unifies with anything
+        # Unknown unifies with anything
+        {:ok, subst}
 
       # Cannot unify
       _ ->
@@ -192,7 +220,8 @@ defmodule Litmus.Types.Unification do
             unify_effects({:effect_row, l1, tail1}, {:effect_row, l2, extended}, subst)
 
           _ ->
-            {:error, {:incompatible_effect_rows, {:effect_row, l1, tail1}, {:effect_row, l2, tail2}}}
+            {:error,
+             {:incompatible_effect_rows, {:effect_row, l1, tail1}, {:effect_row, l2, tail2}}}
         end
     end
   end
@@ -242,31 +271,44 @@ defmodule Litmus.Types.Unification do
   end
 
   defp occurs_in?(var, var), do: true
+
   defp occurs_in?(var, {:function, arg, eff, ret}) do
     occurs_in?(var, arg) or occurs_in?(var, eff) or occurs_in?(var, ret)
   end
+
   defp occurs_in?(var, {:tuple, types}) do
     Enum.any?(types, &occurs_in?(var, &1))
   end
+
   defp occurs_in?(var, {:list, type}) do
     occurs_in?(var, type)
   end
+
   defp occurs_in?(var, {:map, pairs}) do
     Enum.any?(pairs, fn {k, v} -> occurs_in?(var, k) or occurs_in?(var, v) end)
   end
+
   defp occurs_in?(var, {:union, types}) do
     Enum.any?(types, &occurs_in?(var, &1))
   end
+
   defp occurs_in?(var, {:forall, _vars, body}) do
     occurs_in?(var, body)
   end
+
   defp occurs_in?(var, {:effect_row, _label, tail}) do
     occurs_in?(var, tail)
   end
+
+  # Side effects don't contain variables
+  defp occurs_in?(_var, {:s, _list}), do: false
+  # Dependent effects don't contain variables
+  defp occurs_in?(_var, {:d, _list}), do: false
   defp occurs_in?(_var, _type), do: false
 
   # Unify lists of types pairwise
   defp unify_list([], [], subst), do: {:ok, subst}
+
   defp unify_list([t1 | rest1], [t2 | rest2], subst) do
     with {:ok, subst1} <- unify_types(t1, t2, subst),
          {:ok, subst2} <- unify_list(rest1, rest2, subst1) do
@@ -276,6 +318,7 @@ defmodule Litmus.Types.Unification do
 
   # Unify pairs of key-value types
   defp unify_pairs([], [], subst), do: {:ok, subst}
+
   defp unify_pairs([{k1, v1} | rest1], [{k2, v2} | rest2], subst) do
     with {:ok, subst1} <- unify_types(k1, k2, subst),
          {:ok, subst2} <- unify_types(v1, v2, subst1),
@@ -300,9 +343,7 @@ defmodule Litmus.Types.Unification do
         Map.get(renaming, var, var)
 
       {:function, arg, eff, ret} ->
-        {:function,
-         apply_renaming(arg, renaming),
-         apply_renaming(eff, renaming),
+        {:function, apply_renaming(arg, renaming), apply_renaming(eff, renaming),
          apply_renaming(ret, renaming)}
 
       {:tuple, types} ->

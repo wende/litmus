@@ -1,0 +1,27 @@
+{
+  "_metadata": {
+    "description": "Manual resolution supplement for Kernel operators and guards that aren't auto-traced",
+    "note": "These are operators/guards that the tracer skips but need resolution mappings"
+  },
+  "Elixir.Kernel": {
+    "+/1": ["erlang.+/1"],
+    "-/1": ["erlang.-/1"],
+    "+/2": ["erlang.+/2"],
+    "-/2": ["erlang.-/2"],
+    "*/2": ["erlang.*/2"],
+    "//2": ["erlang.//2"],
+    "div/2": ["erlang.div/2"],
+    "rem/2": ["erlang.rem/2"],
+    "and/2": ["erlang.and/2"],
+    "or/2": ["erlang.or/2"],
+    "not/1": ["erlang.not/1"],
+    "==/2": ["erlang.==/2"],
+    "!=/2": ["erlang.'/='/2"],
+    "===/2": ["erlang.=:=/2"],
+    "!==/2": ["erlang.=/=/2"],
+    "</2": ["erlang.</2"],
+    "<=/2": ["erlang.=</2"],
+    ">/2": ["erlang.>/2"],
+    ">=/2": ["erlang.>=/2"]
+  }
+}

@@ -163,19 +163,22 @@ defmodule Litmus.DepsTest do
   describe "real-world usage patterns" do
     test "analyzing a module that uses Jason" do
       # Create a module that uses Jason
-      [{module, _bytecode}] = Code.compile_quoted(quote do
-        defmodule JsonUser do
-          def encode_data(data) do
-            Jason.encode(data)
-          end
+      [{module, _bytecode}] =
+        Code.compile_quoted(
+          quote do
+            defmodule JsonUser do
+              def encode_data(data) do
+                Jason.encode(data)
+              end
 
-          def decode_data(json) do
-            Jason.decode(json)
-          end
+              def decode_data(json) do
+                Jason.decode(json)
+              end
 
-          def pure_calc(x, y), do: x + y
-        end
-      end)
+              def pure_calc(x, y), do: x + y
+            end
+          end
+        )
 
       # Suppress expected errors from Jason analysis
       capture_io(:stderr, fn ->
@@ -201,17 +204,20 @@ defmodule Litmus.DepsTest do
 
     test "exception tracking works with Jason" do
       # Create a module that uses Jason
-      [{module, _bytecode}] = Code.compile_quoted(quote do
-        defmodule JsonExceptionUser do
-          def safe_decode(json) do
-            try do
-              Jason.decode!(json)
-            catch
-              :error, %Jason.DecodeError{} -> {:error, :invalid_json}
+      [{module, _bytecode}] =
+        Code.compile_quoted(
+          quote do
+            defmodule JsonExceptionUser do
+              def safe_decode(json) do
+                try do
+                  Jason.decode!(json)
+                catch
+                  :error, %Jason.DecodeError{} -> {:error, :invalid_json}
+                end
+              end
             end
           end
-        end
-      end)
+        )
 
       {:ok, results} = Litmus.analyze_exceptions(module)
 

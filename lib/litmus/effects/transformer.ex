@@ -126,6 +126,41 @@ defmodule Litmus.Effects.Transformer do
           end
         end
 
+      {:control_flow, {:case_assignment, _meta, var_ast, scrutinee, clauses}} ->
+        # Transform case with assignment: x = case expr do ... end
+        # All clauses need to bind the variable and continue with the rest
+        rest_ast = transform_sequence(rest, opts, meta)
+
+        # Transform each clause body with the variable binding and continuation
+        transformed_clauses =
+          Enum.map(clauses, fn {:->, clause_meta, [patterns, body]} ->
+            transformed_body = transform_branch_with_binding(body, var_ast, rest_ast, opts)
+            {:->, clause_meta, [patterns, transformed_body]}
+          end)
+
+        quote do
+          case unquote(scrutinee) do
+            unquote(transformed_clauses)
+          end
+        end
+
+      {:control_flow, {:case_bare, _meta, scrutinee, clauses}} ->
+        # Transform bare case without assignment
+        # Each clause is transformed and then the rest follows
+        rest_ast = transform_sequence(rest, opts, meta)
+
+        transformed_clauses =
+          Enum.map(clauses, fn {:->, clause_meta, [patterns, body]} ->
+            transformed_body = transform_branch_with_continuation(body, rest_ast, opts)
+            {:->, clause_meta, [patterns, transformed_body]}
+          end)
+
+        quote do
+          case unquote(scrutinee) do
+            unquote(transformed_clauses)
+          end
+        end
+
       {:pure, transformed_ast} ->
         # Not an effect - but might be transformed (e.g., function with effects in body)
         case rest do
@@ -228,6 +263,39 @@ defmodule Litmus.Effects.Transformer do
           end
         end
 
+      {:control_flow, {:case_assignment, _meta, var_ast, scrutinee, clauses}} ->
+        # Final case with assignment - transform clauses and return the variable
+        transformed_clauses =
+          Enum.map(clauses, fn {:->, clause_meta, [patterns, body]} ->
+            transformed_body =
+              quote do
+                unquote(var_ast) = unquote(transform_block(body, opts))
+                unquote(var_ast)
+              end
+
+            {:->, clause_meta, [patterns, transformed_body]}
+          end)
+
+        quote do
+          case unquote(scrutinee) do
+            unquote(transformed_clauses)
+          end
+        end
+
+      {:control_flow, {:case_bare, _meta, scrutinee, clauses}} ->
+        # Final bare case - transform clauses and return result
+        transformed_clauses =
+          Enum.map(clauses, fn {:->, clause_meta, [patterns, body]} ->
+            transformed_body = transform_block(body, opts)
+            {:->, clause_meta, [patterns, transformed_body]}
+          end)
+
+        quote do
+          case unquote(scrutinee) do
+            unquote(transformed_clauses)
+          end
+        end
+
       {:pure, pure_ast} ->
         # Pure expression - return as is
         pure_ast
@@ -292,6 +360,28 @@ defmodule Litmus.Effects.Transformer do
     else
       # No effects, treat as pure
       {:pure, {:if, if_meta, [condition, branches]}}
+    end
+  end
+
+  # Match assignment with case: x = case expr do ... end
+  def extract_effect({:=, meta, [var_ast, {:case, case_meta, [scrutinee, [do: clauses]]}]}, opts) do
+    # Check if any clause body contains effects
+    if Enum.any?(clauses, fn {:->, _, [_pattern, body]} -> contains_effect?(body, opts) end) do
+      {:control_flow, {:case_assignment, meta, var_ast, scrutinee, clauses}}
+    else
+      # No effects in any clause, treat as pure
+      {:pure, {:=, meta, [var_ast, {:case, case_meta, [scrutinee, [do: clauses]]}]}}
+    end
+  end
+
+  # Match bare case: case expr do ... end
+  def extract_effect({:case, case_meta, [scrutinee, [do: clauses]]}, opts) do
+    # Check if any clause body contains effects
+    if Enum.any?(clauses, fn {:->, _, [_pattern, body]} -> contains_effect?(body, opts) end) do
+      {:control_flow, {:case_bare, case_meta, scrutinee, clauses}}
+    else
+      # No effects in any clause, treat as pure
+      {:pure, {:case, case_meta, [scrutinee, [do: clauses]]}}
     end
   end
 

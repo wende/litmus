@@ -16,25 +16,27 @@ defmodule Litmus.Types.CoreTest do
 
     test "extend_effect/2 extends effect row" do
       assert Core.extend_effect(:io, Core.empty_effect()) ==
-        {:effect_row, :io, {:effect_empty}}
+               {:effect_row, :io, {:effect_empty}}
 
       assert Core.extend_effect(:exn, Core.single_effect(:io)) ==
-        {:effect_row, :exn, {:effect_label, :io}}
+               {:effect_row, :exn, {:effect_label, :io}}
     end
 
     test "function_type/3 creates function type with effects" do
       assert Core.function_type(:int, Core.single_effect(:io), :string) ==
-        {:function, :int, {:effect_label, :io}, :string}
+               {:function, :int, {:effect_label, :io}, :string}
     end
 
     test "forall_type/2 creates polymorphic type" do
       assert Core.forall_type([{:type_var, :a}], {:type_var, :a}) ==
-        {:forall, [{:type_var, :a}], {:type_var, :a}}
+               {:forall, [{:type_var, :a}], {:type_var, :a}}
 
-      assert Core.forall_type([{:type_var, :a}, {:effect_var, :e}],
-               {:function, {:type_var, :a}, {:effect_var, :e}, {:type_var, :a}}) ==
-        {:forall, [{:type_var, :a}, {:effect_var, :e}],
-         {:function, {:type_var, :a}, {:effect_var, :e}, {:type_var, :a}}}
+      assert Core.forall_type(
+               [{:type_var, :a}, {:effect_var, :e}],
+               {:function, {:type_var, :a}, {:effect_var, :e}, {:type_var, :a}}
+             ) ==
+               {:forall, [{:type_var, :a}, {:effect_var, :e}],
+                {:function, {:type_var, :a}, {:effect_var, :e}, {:type_var, :a}}}
     end
   end
 
@@ -151,8 +153,10 @@ defmodule Litmus.Types.CoreTest do
 
     test "finds free variables not in forall binding" do
       # ∀a. a -> b (a is bound, b is free)
-      type = {:forall, [{:type_var, :a}],
-               {:function, {:type_var, :a}, {:effect_empty}, {:type_var, :b}}}
+      type =
+        {:forall, [{:type_var, :a}],
+         {:function, {:type_var, :a}, {:effect_empty}, {:type_var, :b}}}
+
       vars = Core.free_variables(type)
 
       assert vars == MapSet.new([{:type_var, :b}])
@@ -160,10 +164,12 @@ defmodule Litmus.Types.CoreTest do
 
     test "handles nested forall with different bindings" do
       # ∀a. (a -> ∀b. b -> c) - only c is free
-      type = {:forall, [{:type_var, :a}],
-               {:function, {:type_var, :a}, {:effect_empty},
-                {:forall, [{:type_var, :b}],
-                 {:function, {:type_var, :b}, {:effect_empty}, {:type_var, :c}}}}}
+      type =
+        {:forall, [{:type_var, :a}],
+         {:function, {:type_var, :a}, {:effect_empty},
+          {:forall, [{:type_var, :b}],
+           {:function, {:type_var, :b}, {:effect_empty}, {:type_var, :c}}}}}
+
       vars = Core.free_variables(type)
 
       assert vars == MapSet.new([{:type_var, :c}])
@@ -171,8 +177,7 @@ defmodule Litmus.Types.CoreTest do
 
     test "handles forall with effect variables" do
       # ∀e. Int -> e String (e is bound)
-      type = {:forall, [{:effect_var, :e}],
-               {:function, :int, {:effect_var, :e}, :string}}
+      type = {:forall, [{:effect_var, :e}], {:function, :int, {:effect_var, :e}, :string}}
       vars = Core.free_variables(type)
 
       assert vars == MapSet.new()
@@ -231,6 +236,20 @@ defmodule Litmus.Types.CoreTest do
       assert Core.to_compact_effect({:effect_label, :dependent}) == :d
     end
 
+    test "converts dependent effect with MFAs to {:d, [MFA list]}" do
+      assert Core.to_compact_effect({:d, ["System.get_env/1"]}) == {:d, ["System.get_env/1"]}
+
+      assert Core.to_compact_effect({:d, ["System.get_env/1", "Process.get/1"]}) ==
+               {:d, ["System.get_env/1", "Process.get/1"]}
+    end
+
+    test "converts side effect with MFAs to {:s, [MFA list]}" do
+      assert Core.to_compact_effect({:s, ["File.read/1"]}) == {:s, ["File.read/1"]}
+
+      assert Core.to_compact_effect({:s, ["File.read/1", "IO.puts/1"]}) ==
+               {:s, ["File.read/1", "IO.puts/1"]}
+    end
+
     test "converts pure exception to exception tuple" do
       assert Core.to_compact_effect({:effect_label, :exn}) == {:e, [:exn]}
     end
@@ -282,6 +301,22 @@ defmodule Litmus.Types.CoreTest do
     test "extracts label from single effect" do
       assert Core.extract_effect_labels({:effect_label, :io}) == [:io]
       assert Core.extract_effect_labels({:effect_label, :exn}) == [:exn]
+    end
+
+    test "extracts side effect with MFAs" do
+      assert Core.extract_effect_labels({:s, ["File.read/1"]}) == [{:s, ["File.read/1"]}]
+
+      assert Core.extract_effect_labels({:s, ["File.read/1", "IO.puts/1"]}) ==
+               [{:s, ["File.read/1", "IO.puts/1"]}]
+    end
+
+    test "extracts dependent effect with MFAs" do
+      assert Core.extract_effect_labels({:d, ["System.get_env/1"]}) == [
+               {:d, ["System.get_env/1"]}
+             ]
+
+      assert Core.extract_effect_labels({:d, ["System.get_env/1", "Process.get/1"]}) ==
+               [{:d, ["System.get_env/1", "Process.get/1"]}]
     end
 
     test "extracts labels from effect row" do

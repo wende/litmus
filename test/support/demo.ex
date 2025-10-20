@@ -18,10 +18,10 @@ defmodule Support.Demo do
   def greet(name) do
     IO.puts("Hello, #{name}!")
   end
-  
+
   # Unknown
   def unknown() do
-    apply(IO, :puts)  
+    apply(IO, :puts)
   end
 
   # Process effects
@@ -33,7 +33,7 @@ defmodule Support.Demo do
   def head_of_list(list) do
     hd(list)
   end
-  
+
   def exception() do
     raise ArgumentError
   end

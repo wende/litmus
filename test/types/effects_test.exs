@@ -79,7 +79,7 @@ defmodule Litmus.Types.EffectsTest do
 
     test "converts multi-element list to effect row" do
       assert Effects.from_list([:io, :exn, :state]) ==
-        {:effect_row, :io, {:effect_row, :exn, {:effect_label, :state}}}
+               {:effect_row, :io, {:effect_row, :exn, {:effect_label, :state}}}
     end
   end
 
@@ -140,41 +140,41 @@ defmodule Litmus.Types.EffectsTest do
       assert effect in [{:effect_label, :exn}, {:effect_unknown}]
     end
 
-    test "maps specific modules to correct effects" do
-      # File operations
-      assert Effects.from_mfa({File, :read, 1}) in [{:effect_label, :file}, {:effect_unknown}]
+    test "maps specific modules to correct side effects with MFAs" do
+      # File operations - uses direct MFA (no longer resolves to Erlang BIFs)
+      assert Effects.from_mfa({File, :read, 1}) == {:s, ["File.read/1"]}
 
-      # IO operations
-      assert Effects.from_mfa({IO, :puts, 1}) in [{:effect_label, :io}, {:effect_unknown}]
+      # IO operations - uses direct MFA
+      assert Effects.from_mfa({IO, :puts, 1}) == {:s, ["IO.puts/1"]}
 
       # Logger operations
-      assert Effects.from_mfa({Logger, :info, 1}) in [{:effect_label, :io}, {:effect_unknown}]
+      assert Effects.from_mfa({Logger, :info, 1}) == {:s, ["Logger.info/1"]}
 
       # Process operations
-      assert Effects.from_mfa({Process, :send, 2}) in [{:effect_label, :process}, {:effect_unknown}]
-      assert Effects.from_mfa({Port, :open, 2}) in [{:effect_label, :process}, {:effect_unknown}]
-      assert Effects.from_mfa({Agent, :start_link, 1}) in [{:effect_label, :process}, {:effect_unknown}]
-      assert Effects.from_mfa({GenServer, :call, 2}) in [{:effect_label, :process}, {:effect_unknown}]
-      assert Effects.from_mfa({Supervisor, :start_link, 2}) in [{:effect_label, :process}, {:effect_unknown}]
+      assert Effects.from_mfa({Process, :send, 2}) == {:s, ["Process.send/2"]}
+      assert Effects.from_mfa({Port, :open, 2}) == {:s, ["Port.open/2"]}
+      assert Effects.from_mfa({Agent, :start_link, 1}) == {:s, ["Agent.start_link/1"]}
+      assert Effects.from_mfa({GenServer, :call, 2}) == {:s, ["GenServer.call/2"]}
+      assert Effects.from_mfa({Supervisor, :start_link, 2}) == {:s, ["Supervisor.start_link/2"]}
 
-      # State operations  (or dependent - System.get_env reads environment)
-      assert Effects.from_mfa({System, :get_env, 1}) in [{:effect_label, :state}, {:effect_label, :dependent}, {:effect_unknown}]
-      assert Effects.from_mfa({Application, :get_env, 2}) in [{:effect_label, :state}, {:effect_label, :dependent}, {:effect_unknown}]
-      assert Effects.from_mfa({Code, :compile_file, 1}) in [{:effect_label, :state}, {:effect_unknown}]
+      # State operations - marked as dependent/side effects in the registry
+      assert Effects.from_mfa({System, :get_env, 1}) == {:d, ["System.get_env/1"]}
+      assert Effects.from_mfa({Application, :get_env, 2}) == {:s, ["Application.get_env/2"]}
+      assert Effects.from_mfa({Code, :compile_file, 1}) == {:s, ["Code.compile_file/1"]}
 
-      # Network operations
-      assert Effects.from_mfa({:gen_tcp, :connect, 3}) in [{:effect_label, :network}, {:effect_unknown}]
-      assert Effects.from_mfa({:gen_udp, :open, 1}) in [{:effect_label, :network}, {:effect_unknown}]
-      assert Effects.from_mfa({:inet, :getaddr, 2}) in [{:effect_label, :network}, {:effect_unknown}]
-      assert Effects.from_mfa({:ssl, :connect, 3}) in [{:effect_label, :network}, {:effect_unknown}]
+      # Network operations (Erlang modules)
+      assert Effects.from_mfa({:gen_tcp, :connect, 3}) == {:s, ["gen_tcp.connect/3"]}
+      assert Effects.from_mfa({:gen_udp, :open, 1}) == {:s, ["gen_udp.open/1"]}
+      assert Effects.from_mfa({:inet, :getaddr, 2}) == {:s, ["inet.getaddr/2"]}
+      assert Effects.from_mfa({:ssl, :connect, 3}) == {:s, ["ssl.connect/3"]}
 
       # Random operations
-      assert Effects.from_mfa({:rand, :uniform, 0}) in [{:effect_label, :random}, {:effect_unknown}]
-      assert Effects.from_mfa({:random, :uniform, 0}) in [{:effect_label, :random}, {:effect_unknown}]
+      assert Effects.from_mfa({:rand, :uniform, 0}) == {:s, ["rand.uniform/0"]}
+      assert Effects.from_mfa({:random, :uniform, 0}) == {:s, ["random.uniform/0"]}
 
       # OS/Erlang operations
-      assert Effects.from_mfa({:os, :cmd, 1}) in [{:effect_label, :state}, {:effect_unknown}]
-      assert Effects.from_mfa({:erlang, :system_info, 1}) in [{:effect_label, :state}, {:effect_label, :dependent}, {:effect_unknown}]
+      assert Effects.from_mfa({:os, :cmd, 1}) == {:s, ["os.cmd/1"]}
+      assert Effects.from_mfa({:erlang, :system_info, 1}) == {:d, ["erlang.system_info/1"]}
     end
   end
 
