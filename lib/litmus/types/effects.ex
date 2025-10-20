@@ -328,8 +328,8 @@ defmodule Litmus.Types.Effects do
       :exn -> {:effect_label, :exn}
       # Exception - can raise (simple :e atom from registry)
       :e -> {:effect_label, :exn}
-      # Exception - can raise (tuple format from runtime cache)
-      {:e, _types} -> {:effect_label, :exn}
+      # Exception - can raise (tuple format from runtime cache with specific exception types)
+      {:e, types} -> {:e, types}
       # Side effects - track specific function MFA(s)
       :s -> {:s, Enum.map(actual_mfas, fn {m, f, a} -> format_mfa(m, f, a) end)}
       # Side effects - tuple format from runtime cache (already has function names)

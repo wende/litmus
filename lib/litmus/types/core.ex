@@ -335,12 +335,24 @@ defmodule Litmus.Types.Core do
       :dependent in labels ->
         :d
 
-      # Only exceptions - return exception types
+      # Only specific exception types - return them
+      Enum.all?(labels, &(match?({:e, _}, &1) or &1 == :exn)) and Enum.any?(labels, &(match?({:e, _}, &1))) ->
+        # Combine all exception types from {:e, types} tuples
+        exception_types = 
+          labels
+          |> Enum.flat_map(fn
+            {:e, types} -> types
+            :exn -> [:exn]
+            _ -> []
+          end)
+        {:e, exception_types}
+
+      # Only generic exceptions - return exception types
       Enum.all?(labels, &(&1 == :exn)) ->
         {:e, [:exn]}
 
-      # Mixed exceptions with other effects
-      :exn in labels ->
+      # Mixed exceptions with other effects (including specific exceptions)
+      (:exn in labels) or (Enum.any?(labels, &(match?({:e, _}, &1)))) ->
         :s
 
       # Shouldn't reach here, but default to side effects
@@ -393,6 +405,10 @@ defmodule Litmus.Types.Core do
       {:d, _list} = dependent_effect ->
         # Dependent effects with specific MFAs
         [dependent_effect]
+
+      {:e, _types} = exception_effect ->
+        # Exception effects with specific exception types
+        [exception_effect]
 
       {:effect_row, label, tail} ->
         [label | extract_effect_labels(tail)]
