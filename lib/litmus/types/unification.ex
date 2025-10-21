@@ -56,6 +56,14 @@ defmodule Litmus.Types.Unification do
           {:ok, subst3}
         end
 
+      # Closure types
+      {{:closure, arg1, captured1, ret1}, {:closure, arg2, captured2, ret2}} ->
+        with {:ok, subst1} <- unify_types(arg1, arg2, subst),
+             {:ok, subst2} <- unify_effects(captured1, captured2, subst1),
+             {:ok, subst3} <- unify_effects(ret1, ret2, subst2) do
+          {:ok, subst3}
+        end
+
       # Tuple types
       {{:tuple, types1}, {:tuple, types2}} when length(types1) == length(types2) ->
         unify_list(types1, types2, subst)

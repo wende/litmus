@@ -493,6 +493,29 @@ defmodule Litmus.Types.Effects do
 
   def extract_exception_types(_), do: []
 
+  @doc """
+  Extracts the return effect from a closure type.
+
+  When a function returns a closure, this extracts the effect the closure
+  will have when called (as opposed to the effect of creating/capturing it).
+
+  ## Examples
+
+      iex> alias Litmus.Types.Effects
+      iex> alias Litmus.Types.Core
+      iex> closure_type = Core.closure_type(:int, Core.empty_effect(), Core.single_effect(:io))
+      iex> Effects.extract_closure_return_effect(closure_type)
+      {:effect_label, :io}
+  """
+  def extract_closure_return_effect({:closure, _arg_type, _captured_effect, return_effect}) do
+    return_effect
+  end
+
+  def extract_closure_return_effect(type) do
+    # Not a closure type, return empty effect
+    {:effect_empty}
+  end
+
   # Helper to extract a label from an effect (for error messages)
   defp extract_label({:effect_label, l}), do: l
   defp extract_label({:effect_row, l, _}), do: l

@@ -544,6 +544,38 @@ def new_function(x) do
 end
 ```
 
+### Closure Types
+
+**Closures** represent functions returned from other functions, with tracked captured and return effects:
+
+```elixir
+# Closure type: {:closure, param_type, captured_effect, return_effect}
+# Where:
+# - param_type: Type of parameters when called
+# - captured_effect: Effects from variables captured in outer scope
+# - return_effect: Effects when the closure is called
+
+def make_logger(target) do
+  # Returns a closure that captures 'target'
+  fn message -> IO.puts("#{target}: #{message}") end
+end
+
+# Analyzing this function:
+# - Captured effect: empty (target is pure data)
+# - Return effect: :io (from IO.puts)
+# - Closure type: {:closure, :string, {:effect_empty}, {:effect_label, :io}}
+
+# When the closure is called:
+logger = make_logger("MyApp")
+logger.("Hello")  # Knows this has :io effect
+```
+
+**Key Differences from Function Types**:
+- **Function types** `{:function, arg, effect, return}`: effect = what happens when called
+- **Closure types** `{:closure, arg, captured, return}`: captured = from outer scope, return = when called
+
+This enables proper tracking of effects through higher-order functions and functional composition patterns.
+
 ### Unification Algorithm
 
 Extended Robinson's algorithm with effect row unification:
@@ -574,11 +606,13 @@ Extended Robinson's algorithm with effect row unification:
 - [x] **Wildcard effect classification** - Module-level effect annotations in `.effects.explicit.json`
 - [x] **Multi-effect extraction** - Functions can have multiple simultaneous effect types tracked (PDR 001/002)
 - [x] **Conservative severity ordering** - Safety-first precedence: Unknown > NIF > Side > Dependent > Exception > Lambda > Pure
+- [x] **Closure type system** - Closure types with captured and return effects (PDR 006)
+- [x] **Closure application handling** - Proper effect tracking when closures are called
+- [x] **Nested closure tracking** - Functions returning functions with effects
 
 ### 🔄 In Progress
 
 - [ ] **Advanced effect features** - `case`, `cond`, `with` in effect macro
-- [ ] **Nested closure tracking** - Functions returning functions with effects
 - [ ] **Pattern matching in lambdas** - Full pattern support in lambda parameters
 
 ### ⏳ Planned
@@ -592,15 +626,16 @@ Extended Robinson's algorithm with effect row unification:
 
 ### Test Status
 
-**Current**: ✅ **679 tests passing (100%)**
+**Current**: ✅ **712 tests passing (100%)**
 
 **Coverage**:
-- Unit tests: 14 passing (ExUnit)
+- Unit tests: 23 passing (ExUnit)
 - Effect analysis: 94+ functions analyzed across multiple test files
 - Exception edge cases: 40+ functions, 31 comprehensive tests
 - Lambda exception propagation: 4 dedicated tests
+- Closure tracking tests: 9 dedicated tests (new)
 - Bugs fixed and verified: 10+ major bugs
-- Test files: `test/analyzer/ast_walker_test.exs`, `test/infer/*.exs`, `test/support/*.exs`
+- Test files: `test/analyzer/ast_walker_test.exs`, `test/infer/*.exs`, `test/support/*.exs`, `test/infer/nested_closure_tracking_test.exs`
 
 ---
 

@@ -28,6 +28,7 @@ defmodule Litmus.Types.Core do
           primitive_type()
           | type_var()
           | {:function, elixir_type(), effect_type(), elixir_type()}
+          | {:closure, elixir_type(), effect_type(), effect_type()}
           | {:tuple, list(elixir_type())}
           | {:list, elixir_type()}
           | {:map, list({elixir_type(), elixir_type()})}
@@ -130,6 +131,23 @@ defmodule Litmus.Types.Core do
   end
 
   @doc """
+  Creates a closure type with captured and return effects.
+
+  A closure represents a function value returned from another function.
+  The captured_effect is the effect from creating/capturing the closure.
+  The return_effect is the effect the closure has when called.
+
+  ## Examples
+
+      iex> alias Litmus.Types.Core
+      iex> Core.closure_type(:string, Core.empty_effect(), Core.single_effect(:io))
+      {:closure, :string, {:effect_empty}, {:effect_label, :io}}
+  """
+  def closure_type(arg_type, captured_effect, return_effect) do
+    {:closure, arg_type, captured_effect, return_effect}
+  end
+
+  @doc """
   Creates a polymorphic type with quantified variables.
 
   ## Examples
@@ -154,6 +172,11 @@ defmodule Litmus.Types.Core do
 
   defp contains_variables?({:function, arg, effect, ret}) do
     contains_variables?(arg) or contains_variables?(effect) or contains_variables?(ret)
+  end
+
+  defp contains_variables?({:closure, arg, captured_effect, return_effect}) do
+    contains_variables?(arg) or contains_variables?(captured_effect) or
+      contains_variables?(return_effect)
   end
 
   defp contains_variables?({:tuple, types}) do
@@ -207,6 +230,15 @@ defmodule Litmus.Types.Core do
           MapSet.union(
             free_variables(effect, bound),
             free_variables(ret, bound)
+          )
+        )
+
+      {:closure, arg, captured_effect, return_effect} ->
+        MapSet.union(
+          free_variables(arg, bound),
+          MapSet.union(
+            free_variables(captured_effect, bound),
+            free_variables(return_effect, bound)
           )
         )
 

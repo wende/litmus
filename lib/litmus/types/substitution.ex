@@ -65,6 +65,10 @@ defmodule Litmus.Types.Substitution do
       {:function, arg, effect, ret} ->
         {:function, apply_subst(subst, arg), apply_subst(subst, effect), apply_subst(subst, ret)}
 
+      {:closure, arg, captured_effect, return_effect} ->
+        {:closure, apply_subst(subst, arg), apply_subst(subst, captured_effect),
+         apply_subst(subst, return_effect)}
+
       {:tuple, types} ->
         {:tuple, Enum.map(types, &apply_subst(subst, &1))}
 
