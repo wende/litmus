@@ -87,12 +87,14 @@ defmodule EdgeCasesAnalysisTest do
     end
 
     test "log_and_save/2 is effectful" do
+      # File.write!/2 now resolves to bottommost File.write/3 + helpers
+      # Effects are deduplicated and sorted
       func =
         assert_effect_type(
           Support.EdgeCasesTest,
           :log_and_save,
           2,
-          {:s, ["IO.puts/1", "File.write!/2"]}
+          {:s, ["File.write/3", "IO.puts/1", "IO.warn/1"]}
         )
 
       assert {IO, :puts, 1} in func.calls
@@ -165,8 +167,9 @@ defmodule EdgeCasesAnalysisTest do
     end
 
     test "if_effectful_else/1 is effectful" do
+      # File.write!/2 now resolves to bottommost File.write/3 + helpers
       func =
-        assert_effect_type(Support.EdgeCasesTest, :if_effectful_else, 1, {:s, ["File.write!/2"]})
+        assert_effect_type(Support.EdgeCasesTest, :if_effectful_else, 1, {:s, ["File.write/3", "IO.warn/1"]})
 
       assert {File, :write!, 2} in func.calls
     end
@@ -249,13 +252,16 @@ defmodule EdgeCasesAnalysisTest do
     end
 
     test "nested_with_effects_at_all_levels/1 is effectful" do
-      # Now correctly tracks effects inside lambdas - 3 IO.puts + 1 File.write!
+      # Effects from direct calls to IO.puts and File.write! inside nested lambdas
+      # File.write!/3 resolves to File.write/3 + helper functions
+      # Only concrete side effects are tracked, not pure (:p) or lambda-dependent (:l) helpers
+      # Effects are deduplicated and sorted (multiple IO.puts calls at different levels)
       func =
         assert_effect_type(
           Support.EdgeCasesTest,
           :nested_with_effects_at_all_levels,
           1,
-          {:s, ["IO.puts/1", "IO.puts/1", "File.write!/3", "IO.puts/1"]}
+          {:s, ["File.write/3", "IO.puts/1", "IO.warn/1"]}
         )
 
       assert {IO, :puts, 1} in func.calls

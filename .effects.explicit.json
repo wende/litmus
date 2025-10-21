@@ -289,6 +289,7 @@
   },
   "Elixir.Map": {
     "fetch/2": "p",
+    "fetch!/2": {"e": ["Elixir.KeyError"]},
     "put/3": "p"
   },
   "Elixir.Port": {
@@ -567,7 +568,6 @@
     "dir?/1": "s",
     "read/2": "s",
     "write/3": "s",
-    "write!/3": "s",
     "rm/1": "s",
     "chmod/2": "s",
     "write/2": "s",
@@ -593,7 +593,6 @@
     "stream!/1": "s",
     "open/2": "s",
     "rm_rf/1": "s",
-    "write!/2": "s",
     "touch/1": "s",
     "cp/3": "s",
     "read/1": "s",
@@ -906,7 +905,11 @@
   "Elixir.Inspect.Map": "*p",
   "Elixir.Inspect.List": "*p",
   "Elixir.Macro.Env": "*p",
-  "Elixir.Integer": "*p",
+  "Elixir.Integer": {
+    "*": "p",
+    "parse!/1": {"e": ["Elixir.ArgumentError"]},
+    "parse!/2": {"e": ["Elixir.ArgumentError"]}
+  },
   "Elixir.String.Unicode": "*p",
   "Elixir.String.Break": "*p",
   "Elixir.Code.Identifier": "*p",

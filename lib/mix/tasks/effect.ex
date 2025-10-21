@@ -407,9 +407,19 @@ defmodule Mix.Tasks.Effect do
 
     effect = analysis.effect
     compact_effect = Core.to_compact_effect(effect)
+    all_effects = Core.extract_all_effects(effect)
 
     Mix.shell().info("  #{get_purity_indicator(effect)}")
-    Mix.shell().info("  Effect: #{Formatter.format_compact_effect(compact_effect)}")
+
+    # Display all effects if multiple, otherwise just the compact one
+    if length(all_effects) > 1 do
+      Mix.shell().info("  Effects:")
+      Enum.each(all_effects, fn eff ->
+        Mix.shell().info("    • #{Formatter.format_compact_effect(eff)}")
+      end)
+    else
+      Mix.shell().info("  Effect: #{Formatter.format_compact_effect(compact_effect)}")
+    end
 
     if opts[:verbose] do
       Mix.shell().info("  Type: #{Formatter.format_type(analysis.type)}")
@@ -574,6 +584,7 @@ defmodule Mix.Tasks.Effect do
             arity: a,
             effect: Formatter.format_effect(analysis.effect),
             compact_effect: Core.to_compact_effect(analysis.effect),
+            all_effects: Core.extract_all_effects(analysis.effect),
             effect_labels: Effects.to_list(analysis.effect),
             is_pure: Effects.is_pure?(analysis.effect),
             type: Formatter.format_type(analysis.type),

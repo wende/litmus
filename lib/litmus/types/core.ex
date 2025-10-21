@@ -283,7 +283,7 @@ defmodule Litmus.Types.Core do
 
       iex> alias Litmus.Types.Core
       iex> Core.to_compact_effect({:d, ["System.get_env/1", "Process.get/1"]})
-      {:d, ["System.get_env/1", "Process.get/1"]}
+      {:d, ["Process.get/1", "System.get_env/1"]}
   """
   def to_compact_effect(effect) do
     labels = extract_effect_labels(effect)
@@ -299,23 +299,29 @@ defmodule Litmus.Types.Core do
 
       # Has specific side effects tracked with MFAs (prioritize over unknown)
       has_side_effect_mfas?(labels) ->
-        # Extract all side effect MFAs and combine them
+        # Extract all side effect MFAs and deduplicate them
         mfas =
-          Enum.flat_map(labels, fn
+          labels
+          |> Enum.flat_map(fn
             {:s, list} -> list
             _ -> []
           end)
+          |> Enum.uniq()
+          |> Enum.sort()
 
         {:s, mfas}
 
       # Has specific dependent effects tracked with MFAs (prioritize over unknown)
       has_dependent_effect_mfas?(labels) ->
-        # Extract all dependent effect MFAs and combine them
+        # Extract all dependent effect MFAs and deduplicate them
         mfas =
-          Enum.flat_map(labels, fn
+          labels
+          |> Enum.flat_map(fn
             {:d, list} -> list
             _ -> []
           end)
+          |> Enum.uniq()
+          |> Enum.sort()
 
         {:d, mfas}
 
@@ -346,6 +352,7 @@ defmodule Litmus.Types.Core do
             _ -> []
           end)
           |> Enum.uniq()
+          |> Enum.sort()
         {:e, exception_types}
 
       # Only generic exceptions - return exception types
@@ -383,6 +390,108 @@ defmodule Litmus.Types.Core do
     side_effect_labels = [:io, :file, :process, :network, :state, :ets, :time, :random]
     Enum.any?(labels, fn label -> label in side_effect_labels end)
   end
+
+  @doc """
+  Extracts all distinct effect types from an effect row and returns them as a list.
+
+  This function walks through the entire effect structure and collects all distinct
+  effect types. Multiple effects of the same category are combined:
+  - Multiple {:s, [mfas]} are merged into single {:s, combined_mfas}
+  - Multiple {:d, [mfas]} are merged into single {:d, combined_mfas}
+  - Multiple {:e, [types]} are merged into single {:e, combined_types}
+
+  Returns a list of all distinct effect types in the effect.
+
+  ## Examples
+
+      iex> Litmus.Types.Core.extract_all_effects({:effect_empty})
+      []
+
+      iex> Litmus.Types.Core.extract_all_effects({:s, ["File.read/1"]})
+      [{:s, ["File.read/1"]}]
+
+      iex> Litmus.Types.Core.extract_all_effects({:effect_row, {:s, ["IO.puts/1"]}, {:e, ["Elixir.ArgumentError"]}})
+      [{:e, ["Elixir.ArgumentError"]}, {:s, ["IO.puts/1"]}]
+
+      iex> Litmus.Types.Core.extract_all_effects({:effect_label, :lambda})
+      [:l]
+  """
+  def extract_all_effects(effect) do
+    # Walk the effect structure and collect all distinct effects
+    do_extract_all_effects(effect, %{
+      side_effects: [],
+      dependent: [],
+      exceptions: [],
+      lambda: false,
+      nif: false,
+      unknown: false
+    })
+  end
+
+  # Recursively extract effects from effect structure
+  defp do_extract_all_effects({:effect_empty}, acc), do: acc_to_list(acc)
+
+  defp do_extract_all_effects({:effect_unknown}, acc) do
+    acc_to_list(%{acc | unknown: true})
+  end
+
+  defp do_extract_all_effects({:effect_var, _}, acc) do
+    acc_to_list(%{acc | unknown: true})
+  end
+
+  defp do_extract_all_effects({:effect_row, head, tail}, acc) do
+    # Process head to update accumulator
+    acc_after_head = process_single_effect(head, acc)
+    # Then process tail with updated accumulator
+    do_extract_all_effects(tail, acc_after_head)
+  end
+
+  # Any other effect - process and return as list
+  defp do_extract_all_effects(effect, acc) do
+    process_single_effect(effect, acc) |> acc_to_list()
+  end
+
+  # Process a single effect and return updated accumulator (not list)
+  defp process_single_effect({:effect_label, :lambda}, acc), do: %{acc | lambda: true}
+  defp process_single_effect({:effect_label, :nif}, acc), do: %{acc | nif: true}
+  defp process_single_effect({:effect_label, :exn}, acc), do: %{acc | exceptions: acc.exceptions ++ [:exn]}
+  defp process_single_effect({:effect_unknown}, acc), do: %{acc | unknown: true}
+  defp process_single_effect({:effect_var, _}, acc), do: %{acc | unknown: true}
+  defp process_single_effect({:s, mfas}, acc), do: %{acc | side_effects: acc.side_effects ++ mfas}
+  defp process_single_effect({:d, mfas}, acc), do: %{acc | dependent: acc.dependent ++ mfas}
+  defp process_single_effect({:e, types}, acc), do: %{acc | exceptions: acc.exceptions ++ types}
+  defp process_single_effect({:effect_row, _, _} = row, acc), do: do_extract_all_effects(row, acc) |> list_to_acc(acc)
+  defp process_single_effect(_, acc), do: %{acc | unknown: true}
+
+  # Convert accumulator to final list
+  defp acc_to_list(acc) do
+    []
+    |> maybe_add_list({:e, Enum.uniq(acc.exceptions)}, acc.exceptions)
+    |> maybe_add_list({:s, Enum.uniq(acc.side_effects)}, acc.side_effects)
+    |> maybe_add_list({:d, Enum.uniq(acc.dependent)}, acc.dependent)
+    |> maybe_add_flag(:l, acc.lambda)
+    |> maybe_add_flag(:n, acc.nif)
+    |> maybe_add_flag(:u, acc.unknown)
+  end
+
+  # Convert list back to accumulator (for merging in effect_row)
+  defp list_to_acc(effect_list, base_acc) do
+    Enum.reduce(effect_list, base_acc, fn
+      {:s, mfas}, acc -> %{acc | side_effects: acc.side_effects ++ mfas}
+      {:d, mfas}, acc -> %{acc | dependent: acc.dependent ++ mfas}
+      {:e, types}, acc -> %{acc | exceptions: acc.exceptions ++ types}
+      :l, acc -> %{acc | lambda: true}
+      :n, acc -> %{acc | nif: true}
+      :u, acc -> %{acc | unknown: true}
+      _, acc -> acc
+    end)
+  end
+
+  defp maybe_add_list(list, _tuple, []), do: list
+  defp maybe_add_list(list, tuple, _items), do: list ++ [tuple]
+
+  defp maybe_add_flag(list, _atom, false), do: list
+  defp maybe_add_flag(list, atom, true), do: list ++ [atom]
 
   @doc """
   Extracts all effect labels from an effect type.

@@ -371,114 +371,91 @@ defmodule Litmus.Effects.Registry do
       else
         case Map.get(@effects_map, mfa) do
           nil ->
-            # Try resolution map first
-            case resolve_to_leaves(mfa) do
-              {:ok, leaves} ->
-                # Get effects from all leaf BIFs and combine them
-                leaf_effects =
-                  Enum.map(leaves, fn leaf_mfa ->
-                    Map.get(@effects_map, leaf_mfa)
-                  end)
-                  |> Enum.reject(&is_nil/1)
+            # Not in effects map - check runtime cache or return nil
+            # Resolution is now handled by caller (from_mfa) to enable multi-effect tracking
+            # Check runtime cache (for cross-module analysis)
+            cache = runtime_cache()
 
-                # If all leaves have effects, combine them
-                # For now, take the first non-pure effect, or pure if all are pure
-                case Enum.find(leaf_effects, fn e -> e != "p" end) || List.first(leaf_effects) do
-                  # No effects found for leaves
-                  nil -> nil
-                  "p" -> :p
-                  "d" -> :d
-                  "s" -> :s
-                  "n" -> :n
-                  "l" -> :l
-                  "u" -> :u
-                  "e" -> :e
-                  %{"e" => types} ->
-                    # Prefix exception types with "Elixir." if not already prefixed
-                    prefixed_types = Enum.map(types, fn
-                      "Elixir." <> _ = type -> type
-                      type -> "Elixir.#{type}"
+            cached_effect =
+              case Map.get(cache, mfa) do
+                nil ->
+                  # Try to resolve nested module names or local function calls
+                  {module, function, arity} = mfa
+
+                  # Strategy 1: Module basename matching
+                  # If MFA is {TestHelper, :func, 1}, try to find Support.EdgeCasesTest.TestHelper.func/1
+                  module_str = to_string(module)
+                  module_basename = module_str |> String.split(".") |> List.last()
+
+                  match =
+                    cache
+                    |> Enum.find(fn {{cached_mod, cached_fun, cached_arity}, _effect} ->
+                      cached_mod_str = to_string(cached_mod)
+                      cached_basename = cached_mod_str |> String.split(".") |> List.last()
+
+                      cached_arity == arity and cached_fun == function and
+                        cached_basename == module_basename
                     end)
-                    {:e, prefixed_types}
-                  other -> other
-                end
 
-              :not_found ->
-                # Check runtime cache (for cross-module analysis)
-                cache = runtime_cache()
-
-                cached_effect =
-                  case Map.get(cache, mfa) do
-                    nil ->
-                      # Try to resolve nested module names or local function calls
-                      {module, function, arity} = mfa
-
-                      # Strategy 1: Module basename matching
-                      # If MFA is {TestHelper, :func, 1}, try to find Support.EdgeCasesTest.TestHelper.func/1
-                      module_str = to_string(module)
-                      module_basename = module_str |> String.split(".") |> List.last()
-
-                      match =
-                        cache
-                        |> Enum.find(fn {{cached_mod, cached_fun, cached_arity}, _effect} ->
-                          cached_mod_str = to_string(cached_mod)
-                          cached_basename = cached_mod_str |> String.split(".") |> List.last()
-
-                          cached_arity == arity and cached_fun == function and
-                            cached_basename == module_basename
-                        end)
-
-                      case match do
-                        {_mfa, effect} ->
-                          effect
-
-                        nil ->
-                          # Strategy 2: For Kernel.func calls that aren't actually in Kernel,
-                          # try to find ANY function with that name and arity in the cache
-                          # This handles local function calls like higher_order_pure
-                          if module == Kernel do
-                            cache
-                            |> Enum.find(fn {{_cached_mod, cached_fun, cached_arity}, _effect} ->
-                              cached_fun == function and cached_arity == arity
-                            end)
-                            |> case do
-                              {_mfa, effect} -> effect
-                              nil -> nil
-                            end
-                          else
-                            nil
-                          end
-                      end
-
-                    effect ->
+                  case match do
+                    {_mfa, effect} ->
                       effect
-                  end
 
-                case cached_effect do
-                  nil ->
-                    # Check if this is an exception struct construction function
-                    # These are generated by defexception and are always pure
-                    if exception_struct_function?(mfa) do
-                      :p
-                      # Special forms are compile-time constructs and are always pure
-                    else
-                      if special_form?(mfa) do
-                        :p
-                        # If it's a stdlib function and not in registry or resolution, raise error
-                        # UNLESS we're in permissive mode (during registry generation)
-                      else
-                        if stdlib_function?(mfa) and not permissive_mode?() do
-                          raise MissingStdlibEffectError, mfa
+                    nil ->
+                      # Strategy 2: For Kernel.func calls that aren't actually in Kernel,
+                      # try to find ANY function with that name and arity in the cache
+                      # This handles local function calls like higher_order_pure
+                      if module == Kernel do
+                        cache
+                        |> Enum.find(fn {{_cached_mod, cached_fun, cached_arity}, _effect} ->
+                          cached_fun == function and cached_arity == arity
+                        end)
+                        |> case do
+                          {_mfa, effect} -> effect
+                          nil -> nil
                         end
-
+                      else
                         nil
                       end
-                    end
+                  end
 
-                  # Runtime cache stores compact effects (atoms/tuples), return directly
-                  cached_effect when is_atom(cached_effect) or is_tuple(cached_effect) ->
-                    cached_effect
+                effect ->
+                  effect
+              end
+
+            case cached_effect do
+              nil ->
+                # Check if this is an exception struct construction function
+                # These are generated by defexception and are always pure
+                if exception_struct_function?(mfa) do
+                  :p
+                  # Special forms are compile-time constructs and are always pure
+                else
+                  if special_form?(mfa) do
+                    :p
+                    # If it's a stdlib function and not in registry, check if it can be resolved
+                    # Only raise error if it CANNOT be resolved and we're not in permissive mode
+                  else
+                    if stdlib_function?(mfa) and not permissive_mode?() do
+                      # Check if it has a resolution - if so, return nil to let caller resolve
+                      case resolve_to_leaves(mfa) do
+                        {:ok, _leaves} ->
+                          # Has resolution, return nil so caller (from_mfa) can handle it
+                          nil
+
+                        :not_found ->
+                          # No resolution available, raise error
+                          raise MissingStdlibEffectError, mfa
+                      end
+                    else
+                      nil
+                    end
+                  end
                 end
+
+              # Runtime cache stores compact effects (atoms/tuples), return directly
+              cached_effect when is_atom(cached_effect) or is_tuple(cached_effect) ->
+                cached_effect
             end
 
           # JSON format from .effects.json (strings and maps)

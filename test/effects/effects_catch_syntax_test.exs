@@ -180,4 +180,136 @@ defmodule Litmus.EffectsNewApiTest do
   #     assert result == "tracked"
   #   end
   # end
+
+  describe "multi-effect functions (PDR 001/002)" do
+    test "File.write! has both side effects and exceptions - can still match" do
+      result =
+        effect do
+          File.write!("test.txt", "content")
+        catch
+          {File, :write!, ["test.txt", "content"]} -> :mocked_write
+        end
+
+      assert result == :mocked_write
+    end
+
+    test "function with IO.puts (side effect) and conditional raise - both effects handled" do
+      result =
+        effect do
+          IO.puts("Processing...")
+          x = File.read!("input.txt")
+          if String.length(x) == 0 do
+            raise ArgumentError, "empty"
+          else
+            :success
+          end
+        catch
+          {IO, :puts, ["Processing..."]} -> :ok
+          {File, :read!, ["input.txt"]} -> "content"
+        end
+
+      assert result == :success
+    end
+
+    test "function with File.read!, File.write!, and raise - match all" do
+      result =
+        effect do
+          content = File.read!("input.txt")
+          if String.length(content) == 0 do
+            raise ArgumentError, "empty file"
+          else
+            File.write!("output.txt", content)
+            :success
+          end
+        catch
+          {File, :read!, ["input.txt"]} -> "test content"
+          {File, :write!, ["output.txt", "test content"]} -> :ok
+        end
+
+      assert result == :success
+    end
+
+    test "function with System.get_env (dependent) and raise - match both" do
+      result =
+        effect do
+          env_value = System.get_env("CONFIG")
+          if is_nil(env_value) do
+            raise ArgumentError, "missing config"
+          else
+            env_value
+          end
+        catch
+          {System, :get_env, ["CONFIG"]} -> "test_config"
+        end
+
+      assert result == "test_config"
+    end
+
+    test "Map.fetch! has only exceptions (no side effects) - still matchable" do
+      result =
+        effect do
+          Map.fetch!(%{a: 1}, :b)
+        catch
+          {Map, :fetch!, [%{a: 1}, :b]} -> :mocked_fetch
+        end
+
+      assert result == :mocked_fetch
+    end
+
+    test "Integer.parse! has only exceptions - still matchable" do
+      result =
+        effect do
+          Integer.parse!("not a number")
+        catch
+          {Integer, :parse!, ["not a number"]} -> 42
+        end
+
+      assert result == 42
+    end
+
+    test "complex function with side effects, dependent, and exceptions" do
+      result =
+        effect do
+          config = System.get_env("DATABASE_URL")
+          IO.puts("Connecting to: #{config}")
+
+          if is_nil(config) do
+            raise RuntimeError, "no database config"
+          else
+            File.write!("connection.log", "Connected to #{config}")
+            :connected
+          end
+        catch
+          {System, :get_env, ["DATABASE_URL"]} -> "postgres://localhost"
+          {IO, :puts, ["Connecting to: postgres://localhost"]} -> :ok
+          {File, :write!, ["connection.log", "Connected to postgres://localhost"]} -> :ok
+        end
+
+      assert result == :connected
+    end
+
+    test "wildcard matching works with multi-effect functions" do
+      result =
+        effect do
+          File.write!("anything.txt", "any content")
+        catch
+          {File, :write!, _} -> :wildcard_matched
+        end
+
+      assert result == :wildcard_matched
+    end
+
+    test "variable capture works with multi-effect functions" do
+      result =
+        effect do
+          File.write!("log.txt", "important message")
+        catch
+          {File, :write!, [path, content]} ->
+            # Return a tuple showing we captured the variables
+            {:captured, path, content}
+        end
+
+      assert result == {:captured, "log.txt", "important message"}
+    end
+  end
 end

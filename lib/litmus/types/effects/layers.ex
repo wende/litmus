@@ -3,19 +3,24 @@ defmodule Litmus.Types.Effects.Layers do
   Effect layer precedence and combining logic.
 
   This module defines the hierarchy of effect types and provides utilities
-  for combining multiple effects into a single, most-impure effect.
+  for combining multiple effects into a single, most-severe effect.
 
-  ## Effect Precedence (most impure to least impure)
+  ## Effect Precedence (most severe to least severe)
 
-  1. `:s` - Side effects (I/O, file, process, network, state mutations)
-  2. `:d` - Dependent (reads from execution environment)
-  3. `:l` - Lambda (effects depend on passed functions)
-  4. `:exn` / `{:e, types}` - Exceptions
-  5. `:n` - NIF (native code)
-  6. `:u` - Unknown
+  1. `:u` - Unknown (cannot analyze, assume worst case)
+  2. `:n` - NIF (native code, black box)
+  3. `:s` - Side effects (I/O, file, process, network, state mutations)
+  4. `:d` - Dependent (reads from execution environment)
+  5. `:exn` / `{:e, types}` - Exceptions (will definitely raise)
+  6. `:l` - Lambda (only impure if passed impure function)
   7. `:p` - Pure (no effects)
 
-  When combining effects, we always take the most impure effect.
+  When combining effects, we always take the most severe effect (highest precedence).
+  This ensures conservative analysis for safety.
+
+  Note: Lambda has lower precedence than exceptions because if we determine a function
+  is lambda-dependent, it means everything we analyzed was pure - the function is only
+  as impure as what you pass to it. In contrast, exceptions will definitely raise.
   """
 
   @type effect_type ::
@@ -36,30 +41,30 @@ defmodule Litmus.Types.Effects.Layers do
   ## Examples
 
       iex> Litmus.Types.Effects.Layers.precedence(:s)
-      7
+      5
 
       iex> Litmus.Types.Effects.Layers.precedence(:p)
       1
 
       iex> Litmus.Types.Effects.Layers.precedence(:exn)
-      4
+      3
   """
   @spec precedence(effect_type()) :: integer()
-  # Side effects - most impure
-  def precedence(:s), do: 7
-  # Dependent
-  def precedence(:d), do: 6
-  # Lambda
-  def precedence(:l), do: 5
-  # Exception
-  def precedence(:exn), do: 4
+  # Unknown - most severe (cannot analyze, assume worst)
+  def precedence(:u), do: 7
+  # NIF - native code, black box
+  def precedence(:n), do: 6
+  # Side effects - performs I/O, mutates state
+  def precedence(:s), do: 5
+  # Dependent - reads from execution environment
+  def precedence(:d), do: 4
+  # Exception - will definitely raise
+  def precedence(:exn), do: 3
   # Exception with types
-  def precedence({:e, _}), do: 4
-  # NIF
-  def precedence(:n), do: 3
-  # Unknown
-  def precedence(:u), do: 2
-  # Pure - least impure
+  def precedence({:e, _}), do: 3
+  # Lambda - only impure if passed impure function
+  def precedence(:l), do: 2
+  # Pure - least severe
   def precedence(:p), do: 1
   # Nil has lowest precedence
   def precedence(nil), do: 0

@@ -28,7 +28,7 @@ defmodule Litmus.Types.Effects do
 
       iex> alias Litmus.Types.Effects
       iex> Effects.combine_effects({:d, ["System.get_env/1"]}, {:d, ["Process.get/1"]})
-      {:d, ["System.get_env/1", "Process.get/1"]}
+      {:d, ["Process.get/1", "System.get_env/1"]}
 
       iex> alias Litmus.Types.Effects
       iex> Effects.combine_effects({:e, ["Elixir.ArgumentError"]}, {:e, ["Elixir.KeyError"]})
@@ -37,19 +37,19 @@ defmodule Litmus.Types.Effects do
   def combine_effects({:effect_empty}, effect2), do: effect2
   def combine_effects(effect1, {:effect_empty}), do: effect1
 
-  # Combine two side effect lists
+  # Combine two side effect lists (deduplicated)
   def combine_effects({:s, list1}, {:s, list2}) do
-    {:s, list1 ++ list2}
+    {:s, (list1 ++ list2) |> Enum.uniq() |> Enum.sort()}
   end
 
-  # Combine two dependent effect lists
+  # Combine two dependent effect lists (deduplicated)
   def combine_effects({:d, list1}, {:d, list2}) do
-    {:d, list1 ++ list2}
+    {:d, (list1 ++ list2) |> Enum.uniq() |> Enum.sort()}
   end
 
-  # Combine two exception effect lists (union of exception types)
+  # Combine two exception effect lists (deduplicated and sorted)
   def combine_effects({:e, list1}, {:e, list2}) do
-    {:e, Enum.uniq(list1 ++ list2)}
+    {:e, (list1 ++ list2) |> Enum.uniq() |> Enum.sort()}
   end
 
   # Combine side effect with other effects
@@ -306,38 +306,77 @@ defmodule Litmus.Types.Effects do
   If the MFA has a resolution mapping to leaf BIFs, those leaf BIFs are used instead.
   """
   def from_mfa({_module, _function, _arity} = mfa) do
-    alias Litmus.Types.Effects.Layers
-
     # First, check if this MFA has a direct effect type in the registry
     direct_effect = Litmus.Effects.Registry.effect_type(mfa)
 
     # If it has a direct effect, use that instead of resolving
     # (Resolution is only for understanding implementation details, not for effect determination)
-    {actual_mfas, effect_type} =
-      if direct_effect != nil do
-        # Has direct effect - use it
-        {[mfa], direct_effect}
-      else
-        # No direct effect - try resolution as fallback
-        case Litmus.Effects.Registry.resolve_to_leaves(mfa) do
-          {:ok, leaves} ->
-            # This is a wrapper function - combine effects from all leaves
-            # Take the most impure effect using Layers.combine_all
-            leaf_effects = Enum.map(leaves, &Litmus.Effects.Registry.effect_type/1)
-            leaf_effect = Layers.combine_all(leaf_effects)
-            {leaves, leaf_effect}
+    if direct_effect != nil do
+      # Has direct effect - use it (single effect)
+      build_single_effect(mfa, direct_effect)
+    else
+      # No direct effect - try resolution as fallback
+      case Litmus.Effects.Registry.resolve_to_leaves(mfa) do
+        {:ok, leaves} ->
+          # This is a wrapper function - resolve to leaves
+          # Get effects from all leaves and combine using most severe
+          leaf_effects = Enum.map(leaves, &Litmus.Effects.Registry.effect_type/1)
+          leaf_effect = Litmus.Types.Effects.Layers.combine_all(leaf_effects)
 
-          :not_found ->
-            # No resolution and no direct effect - unknown
-            {[mfa], :u}
-        end
+          # Filter out non-effectful leaves - we only want to track concrete side effects
+          # Exclude: pure (:p), lambda-dependent (:l), unknown (:u), nif (:n)
+          # Include: side effects (:s), dependent (:d), exceptions (:e/:exn)
+          effectful_leaves = Enum.filter(leaves, fn leaf ->
+            leaf_effect_type = Litmus.Effects.Registry.effect_type(leaf)
+            leaf_effect_type not in [:p, :l, :u, :n]
+          end)
+
+          build_single_effect_with_leaves({mfa, effectful_leaves}, leaf_effect)
+
+        :not_found ->
+          # No resolution and no direct effect - unknown
+          {:effect_unknown}
       end
+    end
+  end
 
+  # Helper to build single effect but track actual leaves
+  defp build_single_effect_with_leaves({_orig_mfa, leaves}, effect_type) do
     case effect_type do
       # Pure function - no effects
       :p -> {:effect_empty}
       # Dependent - reads from execution environment, track specific function(s)
-      :d -> {:d, Enum.map(actual_mfas, fn {m, f, a} -> format_mfa(m, f, a) end)}
+      :d -> {:d, Enum.map(leaves, &format_mfa_tuple/1)}
+      # Dependent - tuple format from runtime cache (already has function names)
+      {:d, list} when is_list(list) -> {:d, list}
+      # Lambda - effects depend on passed lambdas
+      :l -> {:effect_label, :lambda}
+      # Exception - can raise (atom format from JSON)
+      :exn -> {:effect_label, :exn}
+      # Exception - can raise (simple :e atom from registry)
+      :e -> {:effect_label, :exn}
+      # Exception - can raise (tuple format from runtime cache with specific exception types)
+      {:e, types} -> {:e, types}
+      # Side effects - track specific function MFA(s) - use leaves for wrapper functions
+      :s -> {:s, Enum.map(leaves, &format_mfa_tuple/1)}
+      # Side effects - tuple format from runtime cache (already has function names)
+      {:s, list} when is_list(list) -> {:s, list}
+      # NIF - native implemented function
+      :n -> {:effect_label, :nif}
+      # Unknown (atom) or not in registry
+      :u -> {:effect_unknown}
+      # Unknown or not in registry
+      _ -> {:effect_unknown}
+    end
+  end
+
+  # Helper to build a single effect from an MFA and effect type
+  defp build_single_effect(mfa, effect_type) do
+    case effect_type do
+      # Pure function - no effects
+      :p -> {:effect_empty}
+      # Dependent - reads from execution environment, track specific function(s)
+      :d -> {:d, [format_mfa_tuple(mfa)]}
       # Dependent - tuple format from runtime cache (already has function names)
       {:d, list} when is_list(list) -> {:d, list}
       # Lambda - effects depend on passed lambdas
@@ -349,7 +388,7 @@ defmodule Litmus.Types.Effects do
       # Exception - can raise (tuple format from runtime cache with specific exception types)
       {:e, types} -> {:e, types}
       # Side effects - track specific function MFA(s)
-      :s -> {:s, Enum.map(actual_mfas, fn {m, f, a} -> format_mfa(m, f, a) end)}
+      :s -> {:s, [format_mfa_tuple(mfa)]}
       # Side effects - tuple format from runtime cache (already has function names)
       {:s, list} when is_list(list) -> {:s, list}
       # NIF - native implemented function
@@ -360,6 +399,9 @@ defmodule Litmus.Types.Effects do
       _ -> {:effect_unknown}
     end
   end
+
+  # Helper to format MFA tuple as a string
+  defp format_mfa_tuple({m, f, a}), do: format_mfa(m, f, a)
 
   # Helper to format an MFA as a string
   defp format_mfa(module, function, arity) do

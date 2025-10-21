@@ -206,7 +206,8 @@ defmodule InferAnalysisTest do
 
   describe "Side Effects" do
     test "write_to_file/2 is effectful" do
-      func = assert_effect_type(Support.InferTest, :write_to_file, 2, {:s, ["File.write!/2"]})
+      # File.write!/2 now resolves to bottommost File.write/3 + helpers
+      func = assert_effect_type(Support.InferTest, :write_to_file, 2, {:s, ["File.write/3", "IO.warn/1"]})
       assert {File, :write!, 2} in func.calls
     end
 

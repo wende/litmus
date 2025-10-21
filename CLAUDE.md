@@ -4,7 +4,7 @@
 
 **Last Updated**: 2025-10-21
 **Project Version**: v0.1.0
-**Test Status**: ✅ 605 tests passing (100%)
+**Test Status**: ✅ 679 tests passing (100%)
 
 ---
 
@@ -572,6 +572,8 @@ Extended Robinson's algorithm with effect row unification:
 - [x] **Termination analysis** - Detects non-terminating functions
 - [x] **Specific exception tracking** - Tracks specific exception types (ArgumentError, KeyError, etc.)
 - [x] **Wildcard effect classification** - Module-level effect annotations in `.effects.explicit.json`
+- [x] **Multi-effect extraction** - Functions can have multiple simultaneous effect types tracked (PDR 001/002)
+- [x] **Conservative severity ordering** - Safety-first precedence: Unknown > NIF > Side > Dependent > Exception > Lambda > Pure
 
 ### 🔄 In Progress
 
@@ -590,7 +592,7 @@ Extended Robinson's algorithm with effect row unification:
 
 ### Test Status
 
-**Current**: ✅ **605 tests passing (100%)**
+**Current**: ✅ **679 tests passing (100%)**
 
 **Coverage**:
 - Unit tests: 14 passing (ExUnit)

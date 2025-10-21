@@ -1,7 +1,7 @@
 # PDR 002: Functions Returning Both Exception and Side Effect Types
 
 ## Status
-Proposed
+✅ **Implemented** - 2025-10-21
 
 ## Context
 Currently, functions like `File.write!/2` that can both raise exceptions and perform side effects are not properly represented in the effect system. The system needs to handle cases where a single function can have multiple distinct effect types simultaneously, specifically both exception effects and side effects.

@@ -278,7 +278,9 @@ defmodule Litmus.Inference.Bidirectional do
         is_lambda_dependent =
           case effect do
             {:effect_label, :lambda} -> true
-            {:effect_row, labels, _} -> :lambda in labels
+            {:effect_row, head, tail} ->
+              # Check if lambda label exists anywhere in the effect row
+              has_lambda_in_row?(head) or has_lambda_in_row?(tail)
             _ -> false
           end
 
@@ -1233,4 +1235,10 @@ defmodule Litmus.Inference.Bidirectional do
   end
 
   defp extract_exception_from_struct(_), do: {:e, [:dynamic]}
+
+  # Helper to recursively check if lambda label exists in an effect row
+  defp has_lambda_in_row?({:effect_label, :lambda}), do: true
+  defp has_lambda_in_row?({:effect_row, head, tail}),
+    do: has_lambda_in_row?(head) or has_lambda_in_row?(tail)
+  defp has_lambda_in_row?(_), do: false
 end

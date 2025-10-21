@@ -240,7 +240,7 @@ defmodule Litmus.Types.CoreTest do
       assert Core.to_compact_effect({:d, ["System.get_env/1"]}) == {:d, ["System.get_env/1"]}
 
       assert Core.to_compact_effect({:d, ["System.get_env/1", "Process.get/1"]}) ==
-               {:d, ["System.get_env/1", "Process.get/1"]}
+               {:d, ["Process.get/1", "System.get_env/1"]}
     end
 
     test "converts side effect with MFAs to {:s, [MFA list]}" do
@@ -338,6 +338,191 @@ defmodule Litmus.Types.CoreTest do
     test "handles unknown effect structures" do
       assert Core.extract_effect_labels({:invalid_effect}) == [:unknown]
       assert Core.extract_effect_labels(:atom) == [:unknown]
+    end
+  end
+
+  describe "extract_all_effects/1 - returns list of all distinct effect types" do
+    test "empty effect returns empty list" do
+      assert Core.extract_all_effects({:effect_empty}) == []
+    end
+
+    test "pure effect returns :p" do
+      assert Core.extract_all_effects({:effect_empty}) == []
+    end
+
+    test "single side effect returns list with side effect tuple" do
+      effect = {:s, ["File.read/1"]}
+      assert Core.extract_all_effects(effect) == [{:s, ["File.read/1"]}]
+    end
+
+    test "single dependent effect returns list with dependent tuple" do
+      effect = {:d, ["System.get_env/1"]}
+      assert Core.extract_all_effects(effect) == [{:d, ["System.get_env/1"]}]
+    end
+
+    test "single exception effect returns list with exception tuple" do
+      effect = {:e, ["Elixir.ArgumentError"]}
+      assert Core.extract_all_effects(effect) == [{:e, ["Elixir.ArgumentError"]}]
+    end
+
+    test "single effect label returns compact form" do
+      assert Core.extract_all_effects({:effect_label, :lambda}) == [:l]
+      assert Core.extract_all_effects({:effect_label, :nif}) == [:n]
+      assert Core.extract_all_effects({:effect_label, :exn}) == [{:e, [:exn]}]
+    end
+
+    test "effect row with side effects and exceptions returns both" do
+      # This is the key test for PDR 001/002
+      effect = {:effect_row, {:s, ["File.write!/2"]}, {:e, ["Elixir.File.Error"]}}
+      result = Core.extract_all_effects(effect)
+
+      assert {:s, ["File.write!/2"]} in result
+      assert {:e, ["Elixir.File.Error"]} in result
+      assert length(result) == 2
+    end
+
+    test "effect row with side effects and dependent returns both" do
+      effect = {:effect_row, {:s, ["File.read/1"]}, {:d, ["System.get_env/1"]}}
+      result = Core.extract_all_effects(effect)
+
+      assert {:s, ["File.read/1"]} in result
+      assert {:d, ["System.get_env/1"]} in result
+      assert length(result) == 2
+    end
+
+    test "effect row with exception and lambda returns both" do
+      effect = {:effect_row, {:e, ["Elixir.KeyError"]}, {:effect_label, :lambda}}
+      result = Core.extract_all_effects(effect)
+
+      assert {:e, ["Elixir.KeyError"]} in result
+      assert :l in result
+      assert length(result) == 2
+    end
+
+    test "complex effect row with multiple types" do
+      # Side effects + dependent + exception
+      effect = {
+        :effect_row,
+        {:s, ["IO.puts/1"]},
+        {:effect_row, {:d, ["Process.get/1"]}, {:e, ["Elixir.ArgumentError"]}}
+      }
+
+      result = Core.extract_all_effects(effect)
+
+      assert {:s, ["IO.puts/1"]} in result
+      assert {:d, ["Process.get/1"]} in result
+      assert {:e, ["Elixir.ArgumentError"]} in result
+      assert length(result) == 3
+    end
+
+    test "combines multiple side effects into single entry" do
+      effect = {:effect_row, {:s, ["File.read/1"]}, {:s, ["IO.puts/1"]}}
+      result = Core.extract_all_effects(effect)
+
+      # Should have single {:s, combined_list} entry
+      assert length(result) == 1
+      assert {:s, list} = hd(result)
+      assert "File.read/1" in list
+      assert "IO.puts/1" in list
+    end
+
+    test "combines multiple dependent effects into single entry" do
+      effect = {:effect_row, {:d, ["System.get_env/1"]}, {:d, ["Process.get/1"]}}
+      result = Core.extract_all_effects(effect)
+
+      # Should have single {:d, combined_list} entry
+      assert length(result) == 1
+      assert {:d, list} = hd(result)
+      assert "System.get_env/1" in list
+      assert "Process.get/1" in list
+    end
+
+    test "combines multiple exception effects into single entry" do
+      effect = {:effect_row, {:e, ["Elixir.ArgumentError"]}, {:e, ["Elixir.KeyError"]}}
+      result = Core.extract_all_effects(effect)
+
+      # Should have single {:e, combined_list} entry
+      assert length(result) == 1
+      assert {:e, list} = hd(result)
+      assert "Elixir.ArgumentError" in list
+      assert "Elixir.KeyError" in list
+    end
+
+    test "handles effect_unknown as :u" do
+      assert Core.extract_all_effects({:effect_unknown}) == [:u]
+    end
+
+    test "handles effect_var as :u" do
+      assert Core.extract_all_effects({:effect_var, :e}) == [:u]
+    end
+
+    test "real-world: File.write!/2" do
+      # File.write! has both side effects and exceptions
+      effect = {:effect_row, {:s, ["File.write!/2"]}, {:e, ["Elixir.File.Error"]}}
+      result = Core.extract_all_effects(effect)
+
+      # Should return BOTH effects, not just one
+      assert {:s, ["File.write!/2"]} in result
+      assert {:e, ["Elixir.File.Error"]} in result
+    end
+
+    test "real-world: Map.fetch!/2" do
+      # Map.fetch! has only exceptions (is otherwise pure)
+      effect = {:e, ["Elixir.KeyError"]}
+      result = Core.extract_all_effects(effect)
+
+      assert result == [{:e, ["Elixir.KeyError"]}]
+    end
+
+    test "real-world: Enum.map/2" do
+      # Enum.map is lambda-dependent
+      effect = {:effect_label, :lambda}
+      result = Core.extract_all_effects(effect)
+
+      assert result == [:l]
+    end
+
+    test "real-world: complex function with all effect types" do
+      # A function that:
+      # - Performs I/O (side effects)
+      # - Reads environment (dependent)
+      # - Can raise exceptions
+      # - Calls lambda (lambda-dependent)
+      effect = {
+        :effect_row,
+        {:s, ["IO.puts/1"]},
+        {:effect_row, {:d, ["System.get_env/1"]},
+          {:effect_row, {:e, ["Elixir.ArgumentError"]}, {:effect_label, :lambda}}}
+      }
+
+      result = Core.extract_all_effects(effect)
+
+      # Should have all 4 distinct effect types
+      assert length(result) == 4
+      assert {:s, ["IO.puts/1"]} in result
+      assert {:d, ["System.get_env/1"]} in result
+      assert {:e, ["Elixir.ArgumentError"]} in result
+      assert :l in result
+    end
+
+    test "deduplicates exception types across multiple exception effects" do
+      # Multiple exceptions with some overlap
+      effect = {
+        :effect_row,
+        {:e, ["Elixir.ArgumentError", "Elixir.KeyError"]},
+        {:e, ["Elixir.ArgumentError", "Elixir.RuntimeError"]}
+      }
+
+      result = Core.extract_all_effects(effect)
+
+      # Should have single exception entry with deduplicated types
+      assert length(result) == 1
+      assert {:e, types} = hd(result)
+      assert "Elixir.ArgumentError" in types
+      assert "Elixir.KeyError" in types
+      assert "Elixir.RuntimeError" in types
+      # Check no duplicates
+      assert length(types) == length(Enum.uniq(types))
     end
   end
 end

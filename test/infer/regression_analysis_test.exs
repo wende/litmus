@@ -67,12 +67,14 @@ defmodule RegressionAnalysisTest do
 
   describe "Bug #2: Block Expressions" do
     test "bug_2_log_and_save/2 is effectful (not unknown)" do
+      # File.write!/2 now resolves to bottommost File.write/3 + helpers
+      # Effects are deduplicated and sorted
       func =
         assert_effect_type(
           Support.RegressionTest,
           :bug_2_log_and_save,
           2,
-          {:s, ["IO.puts/1", "File.write!/2"]}
+          {:s, ["File.write/3", "IO.puts/1", "IO.warn/1"]}
         )
 
       assert {IO, :puts, 1} in func.calls

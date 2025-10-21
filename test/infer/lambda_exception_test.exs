@@ -6,21 +6,21 @@ defmodule LambdaExceptionTest do
   @moduletag :lambda_exception_debug
 
   test "lambda with if and raise has exception in body effect" do
-    source = """
-    defmodule TestModule do
-      def lambda_with_if_raise do
-        fn item ->
-          if item < 0 do
-            raise ArgumentError, "negative"
-          else
-            item * 2
+    ast =
+      quote do
+        defmodule TestModule do
+          def lambda_with_if_raise do
+            fn item ->
+              if item < 0 do
+                raise ArgumentError, "negative"
+              else
+                item * 2
+              end
+            end
           end
         end
       end
-    end
-    """
 
-    {:ok, ast} = Code.string_to_quoted(source)
     {:ok, result} = ASTWalker.analyze_ast(ast)
 
     func = result.functions[{TestModule, :lambda_with_if_raise, 0}]
@@ -36,21 +36,21 @@ defmodule LambdaExceptionTest do
   end
 
   test "Enum.filter with lambda containing raise propagates exception" do
-    source = """
-    defmodule TestModule do
-      def filter_with_raise(list) do
-        Enum.filter(list, fn item ->
-          if item < 0 do
-            raise ArgumentError, "negative"
-          else
-            item > 5
+    ast =
+      quote do
+        defmodule TestModule do
+          def filter_with_raise(list) do
+            Enum.filter(list, fn item ->
+              if item < 0 do
+                raise ArgumentError, "negative"
+              else
+                item > 5
+              end
+            end)
           end
-        end)
+        end
       end
-    end
-    """
 
-    {:ok, ast} = Code.string_to_quoted(source)
     {:ok, result} = ASTWalker.analyze_ast(ast)
 
     func = result.functions[{TestModule, :filter_with_raise, 1}]
@@ -79,21 +79,21 @@ defmodule LambdaExceptionTest do
   end
 
   test "Enum.map with simple raise propagates exception" do
-    source = """
-    defmodule TestModule do
-      def map_with_raise(list) do
-        Enum.map(list, fn item ->
-          if item == nil do
-            raise ArgumentError, "nil"
-          else
-            item * 2
+    ast =
+      quote do
+        defmodule TestModule do
+          def map_with_raise(list) do
+            Enum.map(list, fn item ->
+              if item == nil do
+                raise ArgumentError, "nil"
+              else
+                item * 2
+              end
+            end)
           end
-        end)
+        end
       end
-    end
-    """
 
-    {:ok, ast} = Code.string_to_quoted(source)
     {:ok, result} = ASTWalker.analyze_ast(ast)
 
     func = result.functions[{TestModule, :map_with_raise, 1}]
@@ -117,25 +117,25 @@ defmodule LambdaExceptionTest do
   end
 
   test "filter_with_lambda_raising from edge cases - with custom exception" do
-    source = """
-    defmodule Support.ExceptionEdgeCasesTest do
-      defmodule DomainError do
-        defexception [:message, :domain]
-      end
-
-      def filter_with_lambda_raising(list) do
-        Enum.filter(list, fn item ->
-          if item < 0 do
-            raise DomainError, message: "Negative numbers not allowed", domain: "positive"
-          else
-            item > 5
+    ast =
+      quote do
+        defmodule Support.ExceptionEdgeCasesTest do
+          defmodule DomainError do
+            defexception [:message, :domain]
           end
-        end)
-      end
-    end
-    """
 
-    {:ok, ast} = Code.string_to_quoted(source)
+          def filter_with_lambda_raising(list) do
+            Enum.filter(list, fn item ->
+              if item < 0 do
+                raise DomainError, message: "Negative numbers not allowed", domain: "positive"
+              else
+                item > 5
+              end
+            end)
+          end
+        end
+      end
+
     {:ok, result} = ASTWalker.analyze_ast(ast)
 
     func = result.functions[{Support.ExceptionEdgeCasesTest, :filter_with_lambda_raising, 1}]

@@ -1,7 +1,7 @@
 # PDR 001: Returning Many Effect Types
 
 ## Status
-Proposed
+✅ **Implemented** - 2025-10-21
 
 ## Context
 Currently, the effect system only allows functions to return a single type of effect. However, there are cases where functions can have multiple different effect types simultaneously. The current system cannot properly represent functions that have multiple effect types such as exception effects, dependent effects, and side effects all at once.
