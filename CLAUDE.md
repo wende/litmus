@@ -4,7 +4,7 @@
 
 **Last Updated**: 2025-10-21
 **Project Version**: v0.1.0
-**Test Status**: ✅ 679 tests passing (100%)
+**Test Status**: ✅ 801 tests passing (100%)
 
 ---
 
@@ -37,7 +37,11 @@ Litmus is a comprehensive static analysis tool for Elixir that provides **four p
 - **87.30%** of Elixir stdlib functions are pure
 - **3,243** stdlib functions analyzed
 - **134** modules in stdlib coverage
-- **605** tests passing with comprehensive coverage
+- **801** tests passing with comprehensive coverage
+  - 48 pattern matching tests
+  - 20 lambda pattern tests
+  - 21 function definition pattern tests
+  - 90+ other feature tests
 - **10** Kernel functions with specific exception types tracked
 
 ### Theoretical Foundation
@@ -576,6 +580,77 @@ logger.("Hello")  # Knows this has :io effect
 
 This enables proper tracking of effects through higher-order functions and functional composition patterns.
 
+### Pattern Matching in All Contexts
+
+**Full pattern matching support** enables destructuring in lambdas, case expressions, and function definitions:
+
+**Lambda Pattern Matching**:
+```elixir
+# Tuple destructuring
+Enum.map([{1, 2}, {3, 4}], fn {a, b} -> a + b end)
+
+# List destructuring
+Enum.map([[1, 2], [3, 4]], fn [h|t] -> h end)
+
+# Map destructuring
+Enum.map([%{x: 1, y: 2}], fn %{x: val} -> val end)
+
+# Multi-clause lambdas
+f = fn
+  0 -> :zero
+  n -> n * 2
+end
+```
+
+**Case Expression Pattern Matching**:
+```elixir
+case data do
+  {a, b} when a > 0 -> a + b        # Tuple with guard
+  [h|t] -> h                         # List head|tail
+  %{key: value} -> value             # Map extraction
+  _ -> :default
+end
+```
+
+**Function Definition Pattern Matching**:
+```elixir
+# Tuple patterns
+def process({:ok, value}) do
+  value
+end
+
+def process({:error, msg}) do
+  msg
+end
+
+# List recursion with patterns
+def sum([]) do
+  0
+end
+
+def sum([h|t]) do
+  h + sum(t)
+end
+
+# Mixed patterns and simple parameters
+def combine({a, b}, x, [h|_t]) do
+  a + b + x + h
+end
+
+# Guards with pattern variables
+def check({x, y}) when x + y > 0 do
+  :positive
+end
+```
+
+**Key Features**:
+- ✅ Variables bound in patterns are available in body expressions
+- ✅ Nested patterns (tuples, lists, maps) work correctly
+- ✅ Multi-clause functions with different patterns
+- ✅ Guard expressions with pattern variable references
+- ✅ Type inference for pattern-bound variables
+- ✅ Full integration with effect tracking
+
 ### Unification Algorithm
 
 Extended Robinson's algorithm with effect row unification:
@@ -609,11 +684,16 @@ Extended Robinson's algorithm with effect row unification:
 - [x] **Closure type system** - Closure types with captured and return effects (PDR 006)
 - [x] **Closure application handling** - Proper effect tracking when closures are called
 - [x] **Nested closure tracking** - Functions returning functions with effects
+- [x] **Pattern matching in lambdas** - Tuple, list, map, struct destructuring in lambda parameters
+- [x] **Pattern matching in case expressions** - Full pattern support with variable binding
+- [x] **Pattern matching in function definitions** - Pattern destructuring in function heads
+- [x] **Multi-clause lambdas** - Support for lambdas with multiple clauses
+- [x] **Guard expression analysis** - Infrastructure for analyzing guard effects and exceptions
 
 ### 🔄 In Progress
 
+- [ ] **Guard exception tracking** - Full exception tracking through guard expressions
 - [ ] **Advanced effect features** - `case`, `cond`, `with` in effect macro
-- [ ] **Pattern matching in lambdas** - Full pattern support in lambda parameters
 
 ### ⏳ Planned
 
@@ -626,16 +706,19 @@ Extended Robinson's algorithm with effect row unification:
 
 ### Test Status
 
-**Current**: ✅ **712 tests passing (100%)**
+**Current**: ✅ **801 tests passing (100%)**
 
 **Coverage**:
 - Unit tests: 23 passing (ExUnit)
+- Pattern matching tests: 48 dedicated tests
+- Lambda pattern tests: 20 dedicated tests
+- Function definition pattern tests: 21 dedicated tests
 - Effect analysis: 94+ functions analyzed across multiple test files
 - Exception edge cases: 40+ functions, 31 comprehensive tests
 - Lambda exception propagation: 4 dedicated tests
-- Closure tracking tests: 9 dedicated tests (new)
+- Closure tracking tests: 9 dedicated tests
 - Bugs fixed and verified: 10+ major bugs
-- Test files: `test/analyzer/ast_walker_test.exs`, `test/infer/*.exs`, `test/support/*.exs`, `test/infer/nested_closure_tracking_test.exs`
+- Test files: `test/analyzer/ast_walker_test.exs`, `test/analyzer/function_pattern_test.exs`, `test/infer/*.exs`, `test/support/*.exs`
 
 ---
 

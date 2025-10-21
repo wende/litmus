@@ -104,16 +104,33 @@ defmodule EdgeCasesAnalysisTest do
 
   describe "Exception Effects" do
     test "exception_explicit_raise/0 has exception effect" do
-      func = assert_effect_type(Support.EdgeCasesTest, :exception_explicit_raise, 0, {:e, ["Elixir.ArgumentError"]})
+      func =
+        assert_effect_type(
+          Support.EdgeCasesTest,
+          :exception_explicit_raise,
+          0,
+          {:e, ["Elixir.ArgumentError"]}
+        )
+
       assert {Kernel, :raise, 2} in func.calls
     end
 
     test "exception_division/2 has exception effect" do
-      assert_effect_type(Support.EdgeCasesTest, :exception_division, 2, {:e, ["Elixir.ArithmeticError"]})
+      assert_effect_type(
+        Support.EdgeCasesTest,
+        :exception_division,
+        2,
+        {:e, ["Elixir.ArithmeticError"]}
+      )
     end
 
     test "exception_from_stdlib/1 has exception effect" do
-      assert_effect_type(Support.EdgeCasesTest, :exception_from_stdlib, 1, {:e, ["Elixir.ArgumentError"]})
+      assert_effect_type(
+        Support.EdgeCasesTest,
+        :exception_from_stdlib,
+        1,
+        {:e, ["Elixir.ArgumentError"]}
+      )
     end
   end
 
@@ -169,7 +186,12 @@ defmodule EdgeCasesAnalysisTest do
     test "if_effectful_else/1 is effectful" do
       # File.write!/2 now resolves to bottommost File.write/3 + helpers
       func =
-        assert_effect_type(Support.EdgeCasesTest, :if_effectful_else, 1, {:s, ["File.write/3", "IO.warn/1"]})
+        assert_effect_type(
+          Support.EdgeCasesTest,
+          :if_effectful_else,
+          1,
+          {:s, ["File.write/3", "IO.warn/1"]}
+        )
 
       assert {File, :write!, 2} in func.calls
     end
@@ -203,7 +225,12 @@ defmodule EdgeCasesAnalysisTest do
     end
 
     test "pipe_with_exception/1 has exception effect" do
-      assert_effect_type(Support.EdgeCasesTest, :pipe_with_exception, 1, {:e, ["Elixir.ArgumentError"]})
+      assert_effect_type(
+        Support.EdgeCasesTest,
+        :pipe_with_exception,
+        1,
+        {:e, ["Elixir.ArgumentError"]}
+      )
     end
   end
 

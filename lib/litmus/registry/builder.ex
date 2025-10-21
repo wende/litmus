@@ -293,29 +293,47 @@ defmodule Litmus.Registry.Builder do
     Litmus.Effects.Registry.set_permissive_mode(true)
 
     result =
-      with {:ok, source_file} <- get_source_file(module),
-           true <- File.exists?(source_file),
-           {:ok, content} <- File.read(source_file),
-           {:ok, ast} <- Code.string_to_quoted(content, file: source_file, line: 1),
-           {:ok, analysis_result} <- ASTWalker.analyze_ast(ast) do
-        # Convert analysis results to registry format
-        registry =
-          analysis_result.functions
-          |> Enum.map(fn {{m, f, a}, analysis} ->
-            effect_type = Core.to_compact_effect(analysis.effect)
-            {{m, f, a}, effect_type}
-          end)
-          |> Map.new()
+      try do
+        with {:ok, source_file} <- get_source_file(module),
+             true <- File.exists?(source_file),
+             {:ok, content} <- File.read(source_file),
+             {:ok, ast} <- Code.string_to_quoted(content, file: source_file, line: 1),
+             {:ok, analysis_result} <- ASTWalker.analyze_ast(ast) do
+          # Convert analysis results to registry format
+          registry =
+            analysis_result.functions
+            |> Enum.map(fn {{m, f, a}, analysis} ->
+              effect_type = Core.to_compact_effect(analysis.effect)
+              {{m, f, a}, effect_type}
+            end)
+            |> Map.new()
 
-        {:ok, registry}
-      else
-        error ->
-          # Debug: show why source analysis failed
+          {:ok, registry}
+        else
+          error ->
+            # Debug: show why source analysis failed
+            if System.get_env("DEBUG_REGISTRY") do
+              IO.puts("  Failed to analyze #{module} from source: #{inspect(error)}")
+            end
+
+            # Fall back to BEAM analysis if source not available
+            analyze_module_from_beam(module)
+        end
+      rescue
+        e in ArgumentError ->
+          # Handle errors from analyzing already-compiled modules with @ attributes
           if System.get_env("DEBUG_REGISTRY") do
-            IO.puts("  Failed to analyze #{module} from source: #{inspect(error)}")
+            IO.puts("  Error analyzing #{module} from source (#{inspect(e.message)}), falling back to BEAM")
           end
 
-          # Fall back to BEAM analysis if source not available
+          analyze_module_from_beam(module)
+
+        e ->
+          # For any other error, fall back to BEAM analysis
+          if System.get_env("DEBUG_REGISTRY") do
+            IO.puts("  Unexpected error analyzing #{module} from source: #{inspect(e)}, falling back to BEAM")
+          end
+
           analyze_module_from_beam(module)
       end
 
@@ -327,10 +345,48 @@ defmodule Litmus.Registry.Builder do
 
   @doc """
   Analyzes a module from its BEAM bytecode when source is not available.
+  Uses PURITY analyzer for actual effect analysis instead of heuristics.
   """
   def analyze_module_from_beam(module) do
+    # Try PURITY analysis first (analyzes actual BEAM bytecode)
+    # PURITY was written for Erlang in 2011 and may fail on modern Elixir code
+    try do
+      case Litmus.analyze_module(module) do
+        {:ok, purity_results} ->
+          # Convert PURITY results to registry format
+          # Filter to only proper MFAs (module, function, arity tuples)
+          registry =
+            purity_results
+            |> Enum.filter(fn
+              {{m, f, a}, _level} when is_atom(m) and is_atom(f) and is_integer(a) -> true
+              _ -> false
+            end)
+            |> Enum.map(fn {{m, f, a}, purity_level} ->
+              # Convert PURITY level to compact effect type
+              effect = purity_level_to_effect(purity_level)
+              {{m, f, a}, effect}
+            end)
+            |> Map.new()
+
+          {:ok, registry}
+
+        {:error, _reason} ->
+          # PURITY failed, fall back to heuristics
+          analyze_with_heuristics(module)
+      end
+    rescue
+      _e ->
+        # PURITY crashed on modern Elixir bytecode, fall back to heuristics
+        if System.get_env("DEBUG_REGISTRY") do
+          IO.puts("  PURITY analysis failed for #{module}, using heuristics")
+        end
+
+        analyze_with_heuristics(module)
+    end
+  end
+
+  defp analyze_with_heuristics(module) do
     with {:ok, exports} <- get_module_exports(module) do
-      # For modules without source, infer effects from function names and known patterns
       registry =
         exports
         |> Enum.map(fn {f, a} ->
@@ -345,6 +401,16 @@ defmodule Litmus.Registry.Builder do
     end
   end
 
+  # Convert PURITY purity level to compact effect type
+  defp purity_level_to_effect(:pure), do: :p
+  defp purity_level_to_effect(:exceptions), do: :exn
+  defp purity_level_to_effect(:dependent), do: :d
+  defp purity_level_to_effect(:lambda_dependent), do: :l
+  defp purity_level_to_effect(:nif), do: :n
+  defp purity_level_to_effect(:side_effects), do: :s
+  defp purity_level_to_effect(:unknown), do: :u
+  defp purity_level_to_effect(_), do: :u
+
   @doc """
   Gets the source file path for a module.
   """
@@ -356,7 +422,14 @@ defmodule Litmus.Registry.Builder do
 
         # Try multiple possible source locations
         candidates = [
-          # Standard lib/ structure
+          # Dependency in deps/ directory
+          # _build/dev/lib/jason/ebin/Elixir.Jason.beam -> deps/jason/lib/jason.ex
+          beam_file
+          |> String.replace(~r/\.beam$/, ".ex")
+          |> String.replace(~r/_build\/[^\/]+\/lib\/([^\/]+)\/ebin/, "deps/\\1/lib"),
+
+          # Application module in lib/
+          # _build/dev/lib/my_app/ebin/Elixir.MyApp.beam -> lib/my_app.ex
           beam_file
           |> String.replace(~r/\.beam$/, ".ex")
           |> String.replace(~r/_build\/[^\/]+\/lib\/[^\/]+\/ebin/, "lib"),

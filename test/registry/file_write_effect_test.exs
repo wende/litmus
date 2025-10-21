@@ -48,11 +48,7 @@ defmodule Litmus.Registry.FileWriteEffectTest do
       {:ok, result} = ASTWalker.analyze_ast(ast)
       func = result.functions[{TestMod, :test_write, 0}]
 
-      IO.puts("\n=== File.write/2 Analysis ===")
-      IO.puts("Effect: #{inspect(func.effect, pretty: true)}")
-
       all_effects = Core.extract_all_effects(func.effect)
-      IO.puts("\nAll effects: #{inspect(all_effects, pretty: true)}")
 
       # Should have side effects
       has_side_effect =

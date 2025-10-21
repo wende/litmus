@@ -29,10 +29,6 @@ defmodule LambdaExceptionTest do
     # The function returns a lambda, so outer effect should be empty/pure
     compact = Core.to_compact_effect(func.effect)
     assert compact == :p, "Function returning lambda should be pure, got: #{inspect(compact)}"
-
-    # Check the function type - the lambda's effect should be inside
-    IO.puts("\nFunction type: #{inspect(func.type, pretty: true)}")
-    IO.puts("Function effect: #{inspect(func.effect, pretty: true)}")
   end
 
   test "Enum.filter with lambda containing raise propagates exception" do
@@ -57,12 +53,6 @@ defmodule LambdaExceptionTest do
     assert func != nil, "Function should be found"
 
     compact = Core.to_compact_effect(func.effect)
-
-    IO.puts("\nEnum.filter function:")
-    IO.puts("  Type: #{inspect(func.type, pretty: true)}")
-    IO.puts("  Effect: #{inspect(func.effect, pretty: true)}")
-    IO.puts("  Compact: #{inspect(compact)}")
-    IO.puts("  Calls: #{inspect(func.calls)}")
 
     # This should propagate the exception from the lambda
     case compact do
@@ -100,9 +90,6 @@ defmodule LambdaExceptionTest do
     assert func != nil, "Function should be found"
 
     compact = Core.to_compact_effect(func.effect)
-
-    IO.puts("\nEnum.map function:")
-    IO.puts("  Compact: #{inspect(compact)}")
 
     case compact do
       {:e, types} ->
@@ -143,41 +130,17 @@ defmodule LambdaExceptionTest do
 
     compact = Core.to_compact_effect(func.effect)
 
-    IO.puts("\nCustom exception in filter:")
-    IO.puts("  Effect: #{inspect(func.effect, pretty: true)}")
-    IO.puts("  Compact: #{inspect(compact)}")
-    IO.puts("  Calls: #{inspect(func.calls)}")
-
-    # Check if DomainError.exception/1 is being called
-    domain_error_exception_call =
-      Enum.any?(func.calls, fn
-        {Support.ExceptionEdgeCasesTest.DomainError, :exception, 1} -> true
-        _ -> false
-      end)
-
-    IO.puts("  DomainError.exception/1 called: #{domain_error_exception_call}")
-
-    # Detailed analysis of what's in the effect
-    IO.puts("\n  Analyzing effect components:")
-    case func.effect do
-      {:effect_row, first, rest} ->
-        IO.puts("    First label: #{inspect(first)}")
-        IO.puts("    Rest: #{inspect(rest, pretty: true)}")
-
-      other ->
-        IO.puts("    Single effect: #{inspect(other)}")
-    end
-
+    # Should detect exception type from raised custom exception
     case compact do
       {:e, _types} ->
-        IO.puts("  ✓ Exception effect detected (may be unknown type due to nested module)")
+        # Exception effect detected
+        :ok
 
       :u ->
-        IO.puts("  ✗ Unknown effect - checking why...")
-        IO.puts("  The :unknown is from DomainError.exception/1 not being in the registry")
+        flunk("Expected exception effect, got unknown")
 
       other ->
-        IO.puts("  ? Unexpected: #{inspect(other)}")
+        flunk("Expected exception effect, got: #{inspect(other)}")
     end
   end
 end

@@ -307,19 +307,10 @@ defmodule ExceptionEdgeCasesAnalysisTest do
         |> Enum.map(&Core.to_compact_effect(&1.effect))
 
       exception_funcs = Enum.count(effects, &match?({:e, _}, &1))
-      lambda_funcs = Enum.count(effects, &(&1 == :l))
-      pure_funcs = Enum.count(effects, &(&1 == :p))
-      unknown_funcs = Enum.count(effects, &(&1 == :u))
-
-      IO.puts("\n  Edge Case Analysis Summary:")
-      IO.puts("    Functions with exceptions: #{exception_funcs}")
-      IO.puts("    Functions with lambda effects: #{lambda_funcs}")
-      IO.puts("    Pure functions: #{pure_funcs}")
-      IO.puts("    Unknown functions: #{unknown_funcs}")
-      IO.puts("    Total functions: #{map_size(result.functions)}")
 
       # Should have at least some exception functions
       assert exception_funcs > 0, "Should have detected some exception functions"
+      assert map_size(result.functions) > 0, "Should have analyzed some functions"
     end
   end
 end

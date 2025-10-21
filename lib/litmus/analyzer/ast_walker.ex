@@ -8,7 +8,7 @@ defmodule Litmus.Analyzer.ASTWalker do
   """
 
   alias Litmus.Inference.{Bidirectional, Context}
-  alias Litmus.Types.Core
+  alias Litmus.Types.{Core, Pattern}
   alias Litmus.Analyzer.EffectTracker
   alias Litmus.Effects.Registry
   alias Litmus.Formatter
@@ -292,17 +292,21 @@ defmodule Litmus.Analyzer.ASTWalker do
   defp add_params_to_context(params, context) do
     {param_types, new_context} =
       Enum.reduce(params, {[], context}, fn param, {types, ctx} ->
-        case param do
-          {name, _, nil} when is_atom(name) ->
-            # Create fresh type variable for parameter
-            param_type = Bidirectional.VarGen.fresh_type_var()
-            {[param_type | types], Context.add(ctx, name, param_type)}
+        # Create fresh type variable for the parameter itself
+        param_type = Bidirectional.VarGen.fresh_type_var()
 
-          _ ->
-            # Complex pattern - use fresh variable
-            param_type = Bidirectional.VarGen.fresh_type_var()
-            {[param_type | types], ctx}
-        end
+        # Extract all variables bound by this parameter pattern
+        pattern_vars = Pattern.extract_variables(param)
+
+        # Add all pattern-bound variables to context
+        updated_ctx =
+          Enum.reduce(pattern_vars, ctx, fn var_name, c ->
+            # Each pattern-bound variable gets a fresh type variable
+            var_type = Bidirectional.VarGen.fresh_type_var()
+            Context.add(c, var_name, var_type)
+          end)
+
+        {[param_type | types], updated_ctx}
       end)
 
     {Enum.reverse(param_types), new_context}

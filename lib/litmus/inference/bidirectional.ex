@@ -12,7 +12,7 @@ defmodule Litmus.Inference.Bidirectional do
   while maintaining decidability.
   """
 
-  alias Litmus.Types.{Core, Effects, Unification, Substitution}
+  alias Litmus.Types.{Core, Effects, Unification, Substitution, Pattern}
   alias Litmus.Inference.Context
 
   @type mode :: :synthesis | :checking
@@ -634,7 +634,7 @@ defmodule Litmus.Inference.Bidirectional do
   # Extract captured variables: variables referenced in body but not in params
   defp extract_captured_vars(body, params) do
     vars_in_body = extract_variables_in_expr(body)
-    param_names = Enum.map(params, &extract_param_name/1) |> MapSet.new()
+    param_names = Pattern.extract_variables_from_list(params) |> MapSet.new()
     MapSet.difference(vars_in_body, param_names)
   end
 
@@ -674,8 +674,15 @@ defmodule Litmus.Inference.Bidirectional do
     {param_types, new_context} =
       Enum.reduce(params, {[], context}, fn param, {types, ctx} ->
         param_type = VarGen.fresh_type_var()
-        param_name = extract_param_name(param)
-        {[param_type | types], Context.add(ctx, param_name, param_type)}
+        # Extract all variables from the pattern (handles destructuring)
+        param_names = Pattern.extract_variables(param)
+        # Add all pattern-bound variables to context
+        updated_ctx =
+          Enum.reduce(param_names, ctx, fn name, c ->
+            Context.add(c, name, VarGen.fresh_type_var())
+          end)
+
+        {[param_type | types], updated_ctx}
       end)
 
     param_types = Enum.reverse(param_types)
@@ -706,9 +713,73 @@ defmodule Litmus.Inference.Bidirectional do
     end
   end
 
+  defp synthesize_lambda(clauses, context) when is_list(clauses) do
+    # Multi-clause lambda: process each clause and combine types/effects
+    clause_results =
+      Enum.map(clauses, fn
+        {:->, _, [params, body]} when is_list(params) ->
+          # Process each clause similar to single-clause lambda
+          {param_types, clause_context} =
+            Enum.reduce(params, {[], context}, fn param, {types, ctx} ->
+              param_type = VarGen.fresh_type_var()
+              param_names = Pattern.extract_variables(param)
+              updated_ctx =
+                Enum.reduce(param_names, ctx, fn name, c ->
+                  Context.add(c, name, VarGen.fresh_type_var())
+                end)
+
+              {[param_type | types], updated_ctx}
+            end)
+
+          param_types = Enum.reverse(param_types)
+
+          case synthesize(body, clause_context) do
+            {:ok, body_type, body_effect, subst} ->
+              {:ok, param_types, body_type, body_effect, subst}
+
+            error ->
+              error
+          end
+
+        _ ->
+          {:error, :invalid_lambda_clause}
+      end)
+
+    # Check for errors
+    case Enum.find(clause_results, &(elem(&1, 0) == :error)) do
+      {:error, _} = error ->
+        error
+
+      nil ->
+        # All clauses succeeded - combine types
+        # For multi-clause lambdas, all clauses should have the same parameter/return types
+        # (Though Elixir allows different arities per clause)
+        # We take the first clause as representative
+        case clause_results do
+          [] ->
+            {:error, :empty_lambda}
+
+          [{:ok, param_types, body_type, body_effect, subst} | _] ->
+            fun_type =
+              case param_types do
+                [] ->
+                  Core.function_type({:tuple, []}, body_effect, body_type)
+
+                [single] ->
+                  Core.function_type(single, body_effect, body_type)
+
+                multiple ->
+                  Core.function_type({:tuple, multiple}, body_effect, body_type)
+              end
+
+            {:ok, fun_type, Core.empty_effect(), subst}
+        end
+    end
+  end
+
   defp synthesize_lambda(_, _context) do
-    # Multi-clause lambdas not yet supported
-    {:error, :complex_lambda_not_supported}
+    # Non-list clauses are invalid
+    {:error, :invalid_lambda_clauses}
   end
 
   defp check_lambda([{:->, _, [params, body]}], context, expected_type, _expected_effect)
@@ -729,9 +800,13 @@ defmodule Litmus.Inference.Bidirectional do
           # Add all parameters to context with their expected types
           new_context =
             Enum.zip(params, expected_param_types)
-            |> Enum.reduce(context, fn {param, param_type}, ctx ->
-              param_name = extract_param_name(param)
-              Context.add(ctx, param_name, param_type)
+            |> Enum.reduce(context, fn {param, _param_type}, ctx ->
+              # Extract all variables from the pattern (handles destructuring)
+              param_names = Pattern.extract_variables(param)
+              # Add pattern-bound variables to context with inferred types
+              Enum.reduce(param_names, ctx, fn name, c ->
+                Context.add(c, name, VarGen.fresh_type_var())
+              end)
             end)
 
           # Check body against expected return type and effect
@@ -897,8 +972,34 @@ defmodule Litmus.Inference.Bidirectional do
   defp synthesize_case_clauses(clauses, context, scrutinee_effect, subst) do
     # Synthesize each clause body
     clause_results =
-      Enum.map(clauses, fn {:->, _, [_pattern, body]} ->
-        synthesize(body, context)
+      Enum.map(clauses, fn {:->, _, [patterns_list, body]} ->
+        # patterns_list is [pattern1, pattern2, ...] for multiple patterns (arity > 1)
+        # For single pattern cases, it's just [pattern]
+        # Extract all patterns and build context
+        clause_context =
+          Enum.reduce(patterns_list, context, fn clause_pattern, ctx ->
+            # Extract pattern and guard (pattern can be {:when, _, [pat, guard]} or just pat)
+            {pattern, _guard} = Pattern.extract_guard(clause_pattern)
+
+            # Extract pattern variables and add to context
+            pattern_vars = Pattern.extract_variables(pattern)
+
+            # Create clause context with pattern bindings
+            Enum.reduce(pattern_vars, ctx, fn var, c ->
+              Context.add(c, var, VarGen.fresh_type_var())
+            end)
+          end)
+
+        # Synthesize body with clause context
+        case synthesize(body, clause_context) do
+          {:ok, body_type, body_effect, body_subst} ->
+            # For now, we don't track guard effects separately in synthesis
+            # (This will be enhanced in Phase 5)
+            {:ok, body_type, body_effect, body_subst}
+
+          error ->
+            error
+        end
       end)
 
     # Check if any clause failed
@@ -947,8 +1048,24 @@ defmodule Litmus.Inference.Bidirectional do
 
     # Check each clause body against expected type
     clause_results =
-      Enum.map(clauses, fn {:->, _, [_pattern, body]} ->
-        check(body, context, expected_type, remaining_effect)
+      Enum.map(clauses, fn {:->, _, [patterns_list, body]} ->
+        # Extract all patterns and build context
+        clause_context =
+          Enum.reduce(patterns_list, context, fn clause_pattern, ctx ->
+            # Extract pattern and guard
+            {pattern, _guard} = Pattern.extract_guard(clause_pattern)
+
+            # Extract pattern variables and add to context
+            pattern_vars = Pattern.extract_variables(pattern)
+
+            # Create clause context with pattern bindings
+            Enum.reduce(pattern_vars, ctx, fn var, c ->
+              Context.add(c, var, VarGen.fresh_type_var())
+            end)
+          end)
+
+        # Check body against expected type
+        check(body, clause_context, expected_type, remaining_effect)
       end)
 
     # Check if any clause failed
@@ -1229,8 +1346,6 @@ defmodule Litmus.Inference.Bidirectional do
     :unknown_module
   end
 
-  defp extract_param_name({name, _, nil}) when is_atom(name), do: name
-  defp extract_param_name(_), do: :_
 
   defp instantiate_type({:forall, vars, body}) do
     # Replace quantified variables with fresh ones
