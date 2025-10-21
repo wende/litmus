@@ -227,15 +227,16 @@ defmodule InferAnalysisTest do
 
   describe "Exceptions" do
     test "may_raise_list_error/1 has exception effect" do
-      assert_effect_type(Support.InferTest, :may_raise_list_error, 1, {:e, [:exn]})
+      assert_effect_type(Support.InferTest, :may_raise_list_error, 1, {:e, ["Elixir.ArgumentError"]})
     end
 
     test "may_raise_division/2 has exception effect" do
-      assert_effect_type(Support.InferTest, :may_raise_division, 2, {:e, [:exn]})
+      assert_effect_type(Support.InferTest, :may_raise_division, 2, {:e, ["Elixir.ArithmeticError"]})
     end
 
     test "explicit_raise/1 has exception effect" do
-      func = assert_effect_type(Support.InferTest, :explicit_raise, 1, {:e, [:exn]})
+      # Dynamic raise with variable gets :dynamic marker
+      func = assert_effect_type(Support.InferTest, :explicit_raise, 1, {:e, [:dynamic]})
       assert {Kernel, :raise, 1} in func.calls
     end
   end
@@ -248,11 +249,26 @@ defmodule InferAnalysisTest do
     end
 
     test "complex_pipeline/1 has exception effect" do
-      # Pattern matching in lambda (fn {k, v} -> ...) creates unknown effects
-      func = assert_effect_type(Support.InferTest, :complex_pipeline, 1, {:e, [:exn]})
-      assert {Enum, :map, 2} in func.calls
-      assert {Enum, :filter, 2} in func.calls
-      assert {Enum, :group_by, 2} in func.calls
+      # Uses rem/2 (ArithmeticError) and elem/2 (ArgumentError)
+      case get_function_effect(Support.InferTest, :complex_pipeline, 1) do
+        {:ok, func} ->
+          compact = Core.to_compact_effect(func.effect)
+
+          case compact do
+            {:e, types} ->
+              assert "Elixir.ArithmeticError" in types, "Expected ArithmeticError from rem/2"
+              assert "Elixir.ArgumentError" in types, "Expected ArgumentError from elem/2"
+            other ->
+              flunk("Expected exception effect, got: #{inspect(other)}")
+          end
+
+          assert {Enum, :map, 2} in func.calls
+          assert {Enum, :filter, 2} in func.calls
+          assert {Enum, :group_by, 2} in func.calls
+
+        {:error, reason} ->
+          flunk("Failed to analyze complex_pipeline/1: #{inspect(reason)}")
+      end
     end
 
     test "complex_with_io/1 is effectful" do

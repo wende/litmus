@@ -97,7 +97,7 @@ defmodule RegressionAnalysisTest do
           Support.RegressionTest,
           :bug_4_exception_with_module_alias,
           0,
-          {:e, [:exn]}
+          {:e, ["Elixir.ArgumentError"]}
         )
 
       assert {Kernel, :raise, 2} in func.calls
@@ -109,7 +109,7 @@ defmodule RegressionAnalysisTest do
           Support.RegressionTest,
           :bug_4_exception_runtime_error,
           0,
-          {:e, [:exn]}
+          {:e, ["Elixir.RuntimeError"]}
         )
 
       assert {Kernel, :raise, 2} in func.calls

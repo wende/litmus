@@ -226,10 +226,33 @@ defmodule Litmus.Inference.Bidirectional do
 
     # Get effect from registry
     arity = length(args)
-    effect = Effects.from_mfa({module, function, arity})
+
+    # Special case: :erlang.error - this is what raise compiles to
+    # Extract the exception module from the first argument
+    # Arity 1: raise ExceptionModule, "message"
+    # Arity 3: raise %ExceptionModule{...} (goes through Kernel.Utils.raise/1)
+    is_erlang_error = module == :erlang and function == :error and arity in [1, 3]
+
+    effect =
+      if is_erlang_error do
+        extract_exception_from_erlang_error(args)
+      else
+        Effects.from_mfa({module, function, arity})
+      end
 
     # Infer argument types
-    arg_results = Enum.map(args, &synthesize(&1, context))
+    # For :erlang.error, skip argument synthesis to avoid unknown effects from
+    # ExceptionModule.exception/1 calls that aren't in the registry
+    arg_results =
+      if is_erlang_error do
+        # Return dummy results for :erlang.error arguments
+        # We don't need type checking for raise arguments
+        Enum.map(args, fn _ ->
+          {:ok, VarGen.fresh_type_var(), Core.empty_effect(), Substitution.empty()}
+        end)
+      else
+        Enum.map(args, &synthesize(&1, context))
+      end
 
     # Check if all succeeded
     case Enum.find(arg_results, &match?({:error, _}, &1)) do
@@ -1166,4 +1189,48 @@ defmodule Litmus.Inference.Bidirectional do
       _ -> effect
     end
   end
+
+  # Extract exception type from Kernel.raise arguments (pre-expansion)
+  # Extract exception type from :erlang.error (post-macro-expansion)
+  # After expansion:
+  # - `raise ArgumentError, "msg"` becomes: :erlang.error(ArgumentError.exception("msg"))
+  # - `raise %ArgumentError{...}` becomes: :erlang.error(Kernel.Utils.raise(%ArgumentError{...}), :none, ...)
+  defp extract_exception_from_erlang_error(args) do
+    case args do
+      # ArgumentError.exception("message") - module is already an atom after expansion
+      [{{:., _, [module, :exception]}, _, _exception_args}] when is_atom(module) ->
+        module_name = Atom.to_string(module)
+        {:e, [module_name]}
+
+      # ArgumentError.exception("message") with aliases still in AST
+      [{{:., _, [{:__aliases__, _, parts}, :exception]}, _, _exception_args}] ->
+        module_name = Module.concat(parts) |> Atom.to_string()
+        {:e, [module_name]}
+
+      # Kernel.Utils.raise(%ArgumentError{...}) - for struct-based raises
+      [{{:., _, [_utils_module, :raise]}, _, [struct_expr]} | _rest] ->
+        extract_exception_from_struct(struct_expr)
+
+      # Variable or complex expression - dynamic
+      [{var, _, _}] when is_atom(var) ->
+        {:e, [:dynamic]}
+
+      # Fallback - generic exception
+      _ ->
+        {:e, [:exn]}
+    end
+  end
+
+  # Extract exception module from struct expression %Module{...}
+  defp extract_exception_from_struct({:%, _, [{:__aliases__, _, parts}, _fields]}) do
+    module_name = Module.concat(parts) |> Atom.to_string()
+    {:e, [module_name]}
+  end
+
+  defp extract_exception_from_struct({:%, _, [module, _fields]}) when is_atom(module) do
+    module_name = Atom.to_string(module)
+    {:e, [module_name]}
+  end
+
+  defp extract_exception_from_struct(_), do: {:e, [:dynamic]}
 end

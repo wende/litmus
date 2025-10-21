@@ -125,13 +125,35 @@ defmodule Litmus.Formatter do
       {:s, multiple} -> "⟨#{Enum.join(multiple, " | ")}⟩"
       {:d, [single]} -> "⟨#{single}⟩"
       {:d, multiple} -> "⟨#{Enum.join(multiple, " | ")}⟩"
+      {:e, types} -> "⟨#{format_exception_types(types)}⟩"
       {:effect_row, label, tail} -> "⟨#{format_first_label(label)} | #{format_effect_tail(tail)}⟩"
       _ -> inspect(effect)
     end
   end
 
+  defp format_exception_types(types) do
+    # If we have specific exception types, filter out the generic :exn marker
+    filtered_types =
+      if Enum.any?(types, &(is_binary(&1) or &1 == :dynamic)) do
+        Enum.reject(types, &(&1 == :exn))
+      else
+        types
+      end
+
+    filtered_types
+    |> Enum.map(&format_exception_name/1)
+    |> Enum.join(" | ")
+  end
+
+  defp format_exception_name(:dynamic), do: "exn:dynamic"
+  defp format_exception_name(:exn), do: "exn"
+  defp format_exception_name("Elixir." <> name), do: "exn:#{name}"
+  defp format_exception_name(name) when is_binary(name), do: "exn:#{name}"
+  defp format_exception_name(name), do: "exn:#{name}"
+
   defp format_first_label({:s, list}), do: Enum.join(list, " | ")
   defp format_first_label({:d, list}), do: Enum.join(list, " | ")
+  defp format_first_label({:e, types}), do: format_exception_types(types)
   defp format_first_label(label), do: "#{label}"
 
   defp format_effect_tail({:effect_empty}), do: ""
@@ -139,6 +161,7 @@ defmodule Litmus.Formatter do
   defp format_effect_tail({:effect_var, name}), do: "#{name}"
   defp format_effect_tail({:s, list}), do: Enum.join(list, " | ")
   defp format_effect_tail({:d, list}), do: Enum.join(list, " | ")
+  defp format_effect_tail({:e, types}), do: format_exception_types(types)
 
   defp format_effect_tail({:effect_row, label, tail}),
     do: "#{format_first_label(label)} | #{format_effect_tail(tail)}"
@@ -179,7 +202,15 @@ defmodule Litmus.Formatter do
       :n -> "n (nif)"
       :s -> "s (side effects)"
       :exn -> "e (exceptions)"
-      {:e, _} -> "e (exceptions)"
+
+      {:e, types} when is_list(types) ->
+        type_list =
+          types
+          |> Enum.map(&format_exception_name/1)
+          |> Enum.join(", ")
+
+        "e (#{type_list})"
+
       :u -> "u (unknown)"
       other -> inspect(other)
     end

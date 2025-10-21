@@ -102,16 +102,16 @@ defmodule EdgeCasesAnalysisTest do
 
   describe "Exception Effects" do
     test "exception_explicit_raise/0 has exception effect" do
-      func = assert_effect_type(Support.EdgeCasesTest, :exception_explicit_raise, 0, {:e, [:exn]})
+      func = assert_effect_type(Support.EdgeCasesTest, :exception_explicit_raise, 0, {:e, ["Elixir.ArgumentError"]})
       assert {Kernel, :raise, 2} in func.calls
     end
 
     test "exception_division/2 has exception effect" do
-      assert_effect_type(Support.EdgeCasesTest, :exception_division, 2, {:e, [:exn]})
+      assert_effect_type(Support.EdgeCasesTest, :exception_division, 2, {:e, ["Elixir.ArithmeticError"]})
     end
 
     test "exception_from_stdlib/1 has exception effect" do
-      assert_effect_type(Support.EdgeCasesTest, :exception_from_stdlib, 1, {:e, [:exn]})
+      assert_effect_type(Support.EdgeCasesTest, :exception_from_stdlib, 1, {:e, ["Elixir.ArgumentError"]})
     end
   end
 
@@ -200,7 +200,7 @@ defmodule EdgeCasesAnalysisTest do
     end
 
     test "pipe_with_exception/1 has exception effect" do
-      assert_effect_type(Support.EdgeCasesTest, :pipe_with_exception, 1, {:e, [:exn]})
+      assert_effect_type(Support.EdgeCasesTest, :pipe_with_exception, 1, {:e, ["Elixir.ArgumentError"]})
     end
   end
 

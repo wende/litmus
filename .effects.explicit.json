@@ -151,6 +151,46 @@
         "ArithmeticError"
       ]
     },
+    "div/2": {
+      "e": [
+        "ArithmeticError"
+      ]
+    },
+    "hd/1": {
+      "e": [
+        "ArgumentError"
+      ]
+    },
+    "tl/1": {
+      "e": [
+        "ArgumentError"
+      ]
+    },
+    "binary_part/3": {
+      "e": [
+        "ArgumentError"
+      ]
+    },
+    "bit_size/1": {
+      "e": [
+        "ArgumentError"
+      ]
+    },
+    "byte_size/1": {
+      "e": [
+        "ArgumentError"
+      ]
+    },
+    "put_elem/3": {
+      "e": [
+        "ArgumentError"
+      ]
+    },
+    "map_size/1": {
+      "e": [
+        "BadMapError"
+      ]
+    },
     "%{}/1": "p"
   },
   "Elixir.Agent": {
@@ -278,9 +318,6 @@
     "start/3": "s",
     "stop/1": "s",
     "unload/1": "s"
-  },
-  "Elixir.String.Unicode": {
-    "upcase/3": "p"
   },
   "erlang": {
     "and/2": "p",
@@ -578,7 +615,7 @@
     ">/2": "p",
     "binary_part/3": {
       "e": [
-        "exn"
+        "ArgumentError"
       ]
     },
     "trunc/1": "p",
@@ -588,7 +625,7 @@
     "//2": "p",
     "put_elem/3": {
       "e": [
-        "exn"
+        "ArgumentError"
       ]
     },
     "is_port/1": "p",
@@ -597,7 +634,7 @@
     "sigil_w/2": "p",
     "map_size/1": {
       "e": [
-        "exn"
+        "BadMapError"
       ]
     },
     "is_bitstring/1": "p",
@@ -624,7 +661,7 @@
     "try/1": "p",
     "tl/1": {
       "e": [
-        "exn"
+        "ArgumentError"
       ]
     },
     "max/2": "p",
@@ -658,7 +695,7 @@
     "in/2": "p",
     "tuple_size/1": {
       "e": [
-        "exn"
+        "ArgumentError"
       ]
     },
     "is_function/1": "p",
@@ -680,7 +717,7 @@
     ">=/2": "p",
     "byte_size/1": {
       "e": [
-        "exn"
+        "ArgumentError"
       ]
     },
     "throw/1": {
@@ -693,7 +730,7 @@
     "spawn/3": "s",
     "div/2": {
       "e": [
-        "exn"
+        "ArithmeticError"
       ]
     },
     "<=/2": "p",
@@ -702,7 +739,7 @@
     "!==/2": "p",
     "bit_size/1": {
       "e": [
-        "exn"
+        "ArgumentError"
       ]
     },
     "spawn_monitor/3": "s",
@@ -748,7 +785,7 @@
     "fn/1": "p",
     "hd/1": {
       "e": [
-        "exn"
+        "ArgumentError"
       ]
     },
     "binary_part/2": {
@@ -859,11 +896,49 @@
     "warn/2": "s",
     "warn/3": "s"
   },
-  "Elixir.Integer": {
-    "to_string/1": "p",
-    "to_string/2": "p"
-  },
   "Elixir.String.Chars": {
     "to_string/1": "p"
+  },
+  "Elixir.IO.ANSI": "*p",
+  "Elixir.Calendar.ISO": "*p",
+  "Elixir.Inspect.Algebra": "*p",
+  "Elixir.Inspect.Opts": "*p",
+  "Elixir.Inspect.Map": "*p",
+  "Elixir.Inspect.List": "*p",
+  "Elixir.Macro.Env": "*p",
+  "Elixir.Integer": "*p",
+  "Elixir.String.Unicode": "*p",
+  "Elixir.String.Break": "*p",
+  "Elixir.Code.Identifier": "*p",
+  "Elixir.Code.Formatter": "*p",
+  "Elixir.File.Stat": {"*": "p"},
+  "Elixir.File.Stream": {"*": "p"},
+  "Elixir.IO.Stream": {"*": "p"},
+  "Elixir.File.CopyError": {"*": "p"},
+  "Elixir.RuntimeError": {"*": "p"},
+  "Elixir.Protocol.UndefinedError": {"*": "p"},
+  "Elixir.UnicodeConversionError": {"*": "p"},
+  "Elixir.File.Error": {"*": "p"},
+  "Elixir.File.LinkError": {"*": "p"},
+  "Elixir.ErlangError": {"*": "p"},
+  "Elixir.IO.StreamError": {"*": "p"},
+  "Elixir.Inspect.Error": {"*": "p"},
+  "Elixir.URI.Error": {"*": "p"},
+  "Elixir.System.EnvError": {"*": "p"},
+  "Elixir.KeyError": {"*": "p"},
+  "Elixir.File.RenameError": {"*": "p"},
+  "Elixir.Enum.EmptyError": {"*": "p"},
+  "Elixir.Regex.CompileError": {"*": "p"},
+  "Elixir.ArgumentError": {"*": "p"},
+  "Elixir.Enum.OutOfBoundsError": {"*": "p"},
+  "Elixir.String.Chars.URI": {"*": "p"},
+  "Elixir.Macro": {
+    "decompose_call/1": "p",
+    "special_form?/2": "p",
+    "unescape_string/1": "p",
+    "unescape_string/2": "p",
+    "var/2": "p",
+    "update_meta/2": "p",
+    "unique_var/2": "d"
   }
 }

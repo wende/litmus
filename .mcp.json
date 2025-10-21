@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "elixir": {
+      "command": "elixir",
+      "args": [
+        "/Users/wende/.cursor/extensions/elixir-lsp.elixir-ls-0.29.3-universal/elixir-ls-release/tcp_to_stdio_bridge.exs",
+        "10414"
+      ]
+    }
+  }
+}

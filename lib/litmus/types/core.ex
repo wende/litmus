@@ -338,13 +338,14 @@ defmodule Litmus.Types.Core do
       # Only specific exception types - return them
       Enum.all?(labels, &(match?({:e, _}, &1) or &1 == :exn)) and Enum.any?(labels, &(match?({:e, _}, &1))) ->
         # Combine all exception types from {:e, types} tuples
-        exception_types = 
+        exception_types =
           labels
           |> Enum.flat_map(fn
-            {:e, types} -> types
+            {:e, types} when is_list(types) -> types
             :exn -> [:exn]
             _ -> []
           end)
+          |> Enum.uniq()
         {:e, exception_types}
 
       # Only generic exceptions - return exception types

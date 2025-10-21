@@ -114,9 +114,38 @@ defmodule Mix.Tasks.Litmus.MergeExplicit do
   end
 
   # Deep merge two maps (explicit overrides bifs)
+  # Supports wildcard syntax in two forms:
+  #   1. Simple: "Elixir.Module": "*p" - all functions are pure
+  #   2. With overrides: "Elixir.Module": {"*": "p", "func/1": "s"} - all pure except func/1
   defp deep_merge(bifs, explicit) do
-    Map.merge(bifs, explicit, fn _module, bifs_functions, explicit_functions ->
-      Map.merge(bifs_functions, explicit_functions)
+    Map.merge(bifs, explicit, fn _module, bifs_functions, explicit_value ->
+      case explicit_value do
+        # Simple wildcard: "*p" means all functions have this effect
+        "*" <> effect when is_binary(explicit_value) ->
+          Map.new(bifs_functions, fn {func_arity, _old_effect} ->
+            {func_arity, effect}
+          end)
+
+        # Map: check for wildcard key "*" plus specific overrides
+        explicit_functions when is_map(explicit_functions) ->
+          case Map.pop(explicit_functions, "*") do
+            {nil, explicit_overrides} ->
+              # No wildcard, just merge function by function
+              Map.merge(bifs_functions, explicit_overrides)
+
+            {wildcard_effect, explicit_overrides} ->
+              # Apply wildcard to all functions, then apply specific overrides
+              bifs_functions
+              |> Map.new(fn {func_arity, _old_effect} ->
+                {func_arity, wildcard_effect}
+              end)
+              |> Map.merge(explicit_overrides)
+          end
+
+        # Shouldn't happen, but handle gracefully
+        _ ->
+          bifs_functions
+      end
     end)
   end
 

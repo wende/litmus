@@ -100,7 +100,9 @@ end
 The system tracks various effect types:
 
 - **`:pure`** - No side effects
-- **`:exn`** - Can raise exceptions
+- **`:exn`** - Can raise exceptions (generic)
+- **`{:e, [modules]}`** - Can raise specific exception types (e.g., ArgumentError, KeyError)
+- **`{:e, [:dynamic]}`** - Can raise exceptions with runtime-determined types
 - **`:io`** - I/O operations
 - **`:file`** - File system operations
 - **`:process`** - Process operations (spawn, send, receive)
@@ -220,13 +222,16 @@ elixir examples/type_effects_demo.exs
 
 - Core type system with row polymorphism
 - Effect types with duplicate label support
+- **Specific exception type tracking** - Tracks ArgumentError, KeyError, etc.
+- **Dynamic exception detection** - Marks runtime-determined exceptions
 - Unification algorithm for types and effects
 - Substitution machinery
 - Bidirectional type inference engine
 - Context management with scoping
 - AST walker for module analysis
 - Effect tracking and extraction
-- Test suite and demonstrations
+- Exception extraction from `raise` statements
+- Test suite and demonstrations (374 tests passing)
 
 ### 🚧 Future Enhancements
 
@@ -275,9 +280,15 @@ Functions:
     Type: {t0, t1} -> ⟨file | io | process | e2⟩ :atom
     Effect: ⟨file | io | process⟩
 
+  validate_input/1:
+    Type: t0 -> ⟨exn:ArgumentError⟩ t1
+    Effect: ⟨exn:ArgumentError⟩
+    Detected effects:
+      • exn:ArgumentError: May raise ArgumentError
+
   parse_data/1 (private):
-    Type: t3 -> ⟨e4⟩ t3
-    Effect: ⟨⟩
+    Type: t3 -> ⟨exn:RuntimeError⟩ t3
+    Effect: ⟨exn:RuntimeError⟩
 
   transform_data/1 (private):
     Type: t5 -> ⟨e6⟩ t7
@@ -285,6 +296,40 @@ Functions:
 
 Errors:
   None
+```
+
+### Specific Exception Type Tracking
+
+The system can track which specific exceptions functions may raise:
+
+```elixir
+# Specific exception type
+def validate!(data) do
+  raise ArgumentError, "invalid data"
+end
+# Effect: {:e, ["Elixir.ArgumentError"]}
+
+# Multiple exception types
+def process!(data) do
+  if invalid?(data) do
+    raise ArgumentError, "invalid"
+  else
+    raise KeyError, key: :missing
+  end
+end
+# Effect: {:e, ["Elixir.ArgumentError", "Elixir.KeyError"]}
+
+# Runtime-determined exception
+def handle!(error) do
+  raise error
+end
+# Effect: {:e, [:dynamic]}
+
+# String raise (defaults to RuntimeError)
+def fail!(msg) do
+  raise msg
+end
+# Effect: {:e, ["Elixir.RuntimeError"]}
 ```
 
 ## Contributing

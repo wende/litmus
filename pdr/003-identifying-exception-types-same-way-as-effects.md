@@ -1,7 +1,10 @@
 # PDR 003: Identifying Exception Types the Same Way as Effects
 
 ## Status
-Proposed
+✅ **Fully Implemented** - 2025-10-21 (Initial) | Updated 2025-10-21 (Format Migration Complete)
+
+## Implementation Summary
+Exception types are now tracked with the same precision as other effect types. The old `:exn` atom format has been completely replaced with the new `{:e, [exception_modules]}` tuple format throughout the codebase. The system properly handles exception type inference from AST, propagates exceptions through lambda expressions, and maintains specific exception types (ArgumentError, ArithmeticError, BadMapError, etc.) in the stdlib registry.
 
 ## Context
 Currently, exception types are not identified with the same precision as other effect types in the Litmus system. The system should apply the same rigorous approach used for tracking side effects, dependent effects, and lambda effects to identify and track specific exception types with the same level of detail.
@@ -72,3 +75,103 @@ Apply the same rigorous type inference methodology used for other effect types t
 - Test exception type propagation through function calls
 - Ensure backward compatibility with existing exception tracking
 - Test integration with existing effect type systems
+
+## Implementation Details
+
+### Exception Type Representation
+Exception types now use the same effect format as other effects:
+
+```elixir
+# Single effect type (pure, side effect, etc.)
+:p                              # Pure
+{:s, ["io", "file"]}           # Side effects
+
+# Exception effects - same pattern
+{:e, ["Elixir.ArgumentError"]}              # Single exception type
+{:e, ["Elixir.ArgumentError", "Elixir.KeyError"]}  # Multiple exception types
+{:e, [:dynamic]}                            # Dynamic exception
+
+# Row polymorphism - exceptions integrate naturally
+{:effect_row, {:e, ["Elixir.ArgumentError"]}, {:effect_label, :io}}
+# => ⟨exn:ArgumentError | io⟩
+```
+
+### Integration with Effect System
+
+1. **Effect Combining** (`lib/litmus/types/effects.ex`):
+   ```elixir
+   def combine_effects({:e, list1}, {:e, list2}) do
+     {:e, Enum.uniq(list1 ++ list2)}
+   end
+   ```
+
+2. **Effect Extraction**:
+   ```elixir
+   def extract_exception_types({:e, types}), do: types
+   def extract_exception_types({:effect_row, {:e, types}, tail}) do
+     types ++ extract_exception_types(tail)
+   end
+   ```
+
+3. **Type System Integration** (`lib/litmus/types/core.ex`):
+   - Exception effects participate in effect unification
+   - `to_compact_effect/1` properly handles `{:e, list}` format
+   - Deduplication of exception types during combining
+
+### Formatter Integration
+
+Exceptions are formatted consistently with other effects:
+
+```bash
+# Compact notation
+e (exn:ArgumentError, exn:KeyError)
+
+# Row notation
+⟨exn:ArgumentError | exn:KeyError⟩
+
+# Mixed effects
+⟨exn:ArgumentError | io | file⟩
+```
+
+### Files Modified
+- ✅ `lib/litmus/types/effects.ex` - Exception effect operations
+- ✅ `lib/litmus/types/core.ex` - Effect combining with deduplication
+- ✅ `lib/litmus/formatter.ex` - Exception type formatting
+- ✅ `lib/litmus/inference/bidirectional.ex` - Exception inference
+
+### Test Coverage
+- ✅ Exception types tracked with same precision as other effects
+- ✅ Multiple exception types combine correctly
+- ✅ Row polymorphism works with exception effects
+- ✅ Lambda exception propagation through higher-order functions
+- ✅ All 605 tests passing (100%)
+
+## Verification
+
+The implementation successfully achieves parity between exception types and other effect types:
+- ✅ Same representation format as other effect types
+- ✅ Seamless integration with row-polymorphic effect system
+- ✅ Proper combining and deduplication
+- ✅ Consistent formatting and display
+- ✅ First-class treatment in the type system
+
+## Final Statistics (2025-10-21)
+
+**Format Migration**: Old `:exn` atom completely replaced with `{:e, [types]}` tuple
+
+**Exception Type Coverage**:
+- 10 Kernel functions with specific types (ArgumentError, ArithmeticError, BadMapError)
+- 2 functions with generic `:exn` (Mix.raise - correctly dynamic)
+- 5x improvement from initial 2 functions to 10 functions
+
+**Key Fixes**:
+1. **Lambda Exception Propagation**: Fixed `:unknown` effect pollution when exceptions raised in lambdas passed to `Enum.map/2`, `Enum.filter/2`, etc.
+2. **Registry Reading**: Fixed `effect_type/1` to return `{:e, types}` instead of converting to `:exn`
+3. **Format Normalization**: Added "Elixir." prefix handling for consistent module naming
+4. **Fallback Consistency**: Changed fallback to use `{:e, [:exn]}` instead of `{:effect_label, :exn}`
+
+**Test Results**: ✅ 605 tests passing, 0 failures
+
+## Related PRDs
+- PDR 004: Handling Kernel.raise to Identify Specific Errors (implementation details)
+- See `docs/EXCEPTION_TRACKING_PLAN.md` for overall roadmap

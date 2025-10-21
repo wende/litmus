@@ -29,6 +29,10 @@ defmodule Litmus.Types.Effects do
       iex> alias Litmus.Types.Effects
       iex> Effects.combine_effects({:d, ["System.get_env/1"]}, {:d, ["Process.get/1"]})
       {:d, ["System.get_env/1", "Process.get/1"]}
+
+      iex> alias Litmus.Types.Effects
+      iex> Effects.combine_effects({:e, ["Elixir.ArgumentError"]}, {:e, ["Elixir.KeyError"]})
+      {:e, ["Elixir.ArgumentError", "Elixir.KeyError"]}
   """
   def combine_effects({:effect_empty}, effect2), do: effect2
   def combine_effects(effect1, {:effect_empty}), do: effect1
@@ -41,6 +45,11 @@ defmodule Litmus.Types.Effects do
   # Combine two dependent effect lists
   def combine_effects({:d, list1}, {:d, list2}) do
     {:d, list1 ++ list2}
+  end
+
+  # Combine two exception effect lists (union of exception types)
+  def combine_effects({:e, list1}, {:e, list2}) do
+    {:e, Enum.uniq(list1 ++ list2)}
   end
 
   # Combine side effect with other effects
@@ -59,6 +68,15 @@ defmodule Litmus.Types.Effects do
 
   def combine_effects(effect, {:d, _list} = d) do
     {:effect_row, extract_label(effect), d}
+  end
+
+  # Combine exception effect with other effects
+  def combine_effects({:e, _list} = e, effect) do
+    {:effect_row, e, effect}
+  end
+
+  def combine_effects(effect, {:e, _list} = e) do
+    {:effect_row, extract_label(effect), e}
   end
 
   def combine_effects({:effect_label, l1}, {:effect_label, l2}) do
@@ -397,6 +415,42 @@ defmodule Litmus.Types.Effects do
   # Can't determine for variables
   def subeffect?(_, _), do: :unknown
 
+  @doc """
+  Extracts all exception types from an effect.
+
+  Returns a list of exception module names or :dynamic/:exn markers.
+
+  ## Examples
+
+      iex> alias Litmus.Types.Effects
+      iex> Effects.extract_exception_types({:e, ["Elixir.ArgumentError", "Elixir.KeyError"]})
+      ["Elixir.ArgumentError", "Elixir.KeyError"]
+
+      iex> alias Litmus.Types.Effects
+      iex> Effects.extract_exception_types({:effect_label, :exn})
+      [:exn]
+
+      iex> alias Litmus.Types.Effects
+      iex> Effects.extract_exception_types({:effect_row, {:e, ["Elixir.ArgumentError"]}, {:effect_label, :io}})
+      ["Elixir.ArgumentError"]
+  """
+  def extract_exception_types({:e, types}) when is_list(types), do: types
+  def extract_exception_types({:effect_label, :exn}), do: [:exn]
+
+  def extract_exception_types({:effect_row, {:e, types}, tail}) when is_list(types) do
+    types ++ extract_exception_types(tail)
+  end
+
+  def extract_exception_types({:effect_row, :exn, tail}) do
+    [:exn | extract_exception_types(tail)]
+  end
+
+  def extract_exception_types({:effect_row, _, tail}) do
+    extract_exception_types(tail)
+  end
+
+  def extract_exception_types(_), do: []
+
   # Helper to extract a label from an effect (for error messages)
   defp extract_label({:effect_label, l}), do: l
   defp extract_label({:effect_row, l, _}), do: l
@@ -404,6 +458,8 @@ defmodule Litmus.Types.Effects do
   defp extract_label({:s, list}), do: {:s, list}
   # Return the whole dependent effect for rows
   defp extract_label({:d, list}), do: {:d, list}
+  # Return the whole exception effect for rows
+  defp extract_label({:e, list}), do: {:e, list}
   defp extract_label(_), do: :unknown
 
   # Helper to remove first occurrence of a label

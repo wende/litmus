@@ -393,7 +393,13 @@ defmodule Litmus.Effects.Registry do
                   "l" -> :l
                   "u" -> :u
                   "e" -> :e
-                  %{"e" => types} -> {:e, Enum.map(types, &String.to_atom/1)}
+                  %{"e" => types} ->
+                    # Prefix exception types with "Elixir." if not already prefixed
+                    prefixed_types = Enum.map(types, fn
+                      "Elixir." <> _ = type -> type
+                      type -> "Elixir.#{type}"
+                    end)
+                    {:e, prefixed_types}
                   other -> other
                 end
 
@@ -500,8 +506,13 @@ defmodule Litmus.Effects.Registry do
           %{"e" => ["exn"]} ->
             :exn
 
-          %{"e" => _} ->
-            :exn
+          %{"e" => types} ->
+            # Prefix exception types with "Elixir." if not already prefixed
+            prefixed_types = Enum.map(types, fn
+              "Elixir." <> _ = type -> type
+              type -> "Elixir.#{type}"
+            end)
+            {:e, prefixed_types}
 
           _ ->
             :u

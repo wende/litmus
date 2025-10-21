@@ -2,9 +2,9 @@
 
 > **Purpose**: This document provides comprehensive context about the Litmus project for AI assistants and developers working with the codebase.
 
-**Last Updated**: 2025-10-19
+**Last Updated**: 2025-10-21
 **Project Version**: v0.1.0
-**Test Status**: ✅ 374 tests passing (100%)
+**Test Status**: ✅ 605 tests passing (100%)
 
 ---
 
@@ -37,7 +37,8 @@ Litmus is a comprehensive static analysis tool for Elixir that provides **four p
 - **87.30%** of Elixir stdlib functions are pure
 - **3,243** stdlib functions analyzed
 - **134** modules in stdlib coverage
-- **374** tests passing with comprehensive coverage
+- **605** tests passing with comprehensive coverage
+- **10** Kernel functions with specific exception types tracked
 
 ### Theoretical Foundation
 
@@ -249,13 +250,65 @@ end
 
 **Track which exceptions each function may raise, independently from purity analysis.**
 
-**Exception Types**:
-- **Typed exceptions** (`:error` class) - ArgumentError, KeyError, etc.
-- **Untyped exceptions** (`:throw`/`:exit` classes) - Arbitrary values
-- **Dynamic exceptions** (`:dynamic`) - Type cannot be determined statically
+**Status**: ✅ **Specific exception type tracking implemented** in bidirectional inference system.
 
+**Exception Types**:
+- **Typed exceptions** (`:error` class) - ArgumentError, KeyError, etc. (✅ tracked)
+- **Untyped exceptions** (`:throw`/`:exit` classes) - Arbitrary values (planned)
+- **Dynamic exceptions** (`:dynamic`) - Type cannot be determined statically (✅ tracked)
+
+**Current Implementation (AST-based)**:
 ```elixir
-# Analyze exceptions for a module
+# Analyze source code with mix effect
+$ mix effect lib/my_module.ex
+
+# Or programmatically
+{:ok, result} = Litmus.Analyzer.ASTWalker.analyze_file("lib/my_module.ex")
+
+# Check exception types for a function
+func = result.functions[{MyModule, :validate!, 1}]
+func.effect
+#=> {:e, ["Elixir.ArgumentError"]}
+
+# Extract exception types
+Litmus.Types.Effects.extract_exception_types(func.effect)
+#=> ["Elixir.ArgumentError"]
+```
+
+**Examples**:
+```elixir
+# Specific exception type
+def validate!(data) do
+  raise ArgumentError, "invalid data"
+end
+# Effect: {:e, ["Elixir.ArgumentError"]}
+
+# Multiple exception types
+def process!(data) do
+  if invalid?(data) do
+    raise ArgumentError, "invalid"
+  else
+    raise KeyError, key: :missing
+  end
+end
+# Effect: {:e, ["Elixir.ArgumentError", "Elixir.KeyError"]}
+
+# Dynamic exception (runtime-determined)
+def handle!(error) do
+  raise error
+end
+# Effect: {:e, [:dynamic]}
+
+# String raise (defaults to RuntimeError)
+def fail!(msg) do
+  raise msg
+end
+# Effect: {:e, ["Elixir.RuntimeError"]}
+```
+
+**Planned (BEAM bytecode analysis)**:
+```elixir
+# Analyze exceptions for compiled modules
 {:ok, exceptions} = Litmus.analyze_exceptions(MyModule)
 
 # Check if a function can raise a specific exception
@@ -517,6 +570,8 @@ Extended Robinson's algorithm with effect row unification:
 - [x] **Lambda effect propagation** - Higher-order function support
 - [x] **Mix task** - `mix effect` command with cross-module tracking
 - [x] **Termination analysis** - Detects non-terminating functions
+- [x] **Specific exception tracking** - Tracks specific exception types (ArgumentError, KeyError, etc.)
+- [x] **Wildcard effect classification** - Module-level effect annotations in `.effects.explicit.json`
 
 ### 🔄 In Progress
 
@@ -535,13 +590,15 @@ Extended Robinson's algorithm with effect row unification:
 
 ### Test Status
 
-**Current**: ✅ **374 tests passing (100%)**
+**Current**: ✅ **605 tests passing (100%)**
 
 **Coverage**:
 - Unit tests: 14 passing (ExUnit)
-- Effect analysis: 94 functions analyzed across 3 test files
-- Bugs fixed and verified: 10 major bugs
-- Test files: `test/analyzer/ast_walker_test.exs`, `test/infer/*.exs`
+- Effect analysis: 94+ functions analyzed across multiple test files
+- Exception edge cases: 40+ functions, 31 comprehensive tests
+- Lambda exception propagation: 4 dedicated tests
+- Bugs fixed and verified: 10+ major bugs
+- Test files: `test/analyzer/ast_walker_test.exs`, `test/infer/*.exs`, `test/support/*.exs`
 
 ---
 
@@ -678,18 +735,56 @@ Summary: 1 function analyzed
 
 ### Adding New Stdlib Functions to Registry
 
+**Registry File Structure**:
+- **`.effects/bottommost.json`** - Auto-generated with heuristic classification (don't edit)
+- **`.effects.explicit.json`** - Manual human-reviewed classifications (edit this!)
+- **`.effects/std.json`** - Final merged registry (auto-generated via `mix litmus.merge_explicit`)
+
+**Workflow**:
+
 1. **Locate the function**: Determine module, function, arity
 2. **Classify effect**: Determine effect type (p, s, l, d, u, n, e)
-3. **Update `.effects.json`**:
+3. **Update `.effects.explicit.json`** (two syntaxes):
+
+   **Individual functions**:
    ```json
    {
      "Elixir.MyModule": {
-       "my_function/2": "p"
+       "my_function/2": "p",
+       "other_function/1": "s"
      }
    }
    ```
-4. **Test**: Add test case verifying correct classification
-5. **Document**: Update documentation if adding new effect category
+
+   **Module-level wildcard** (all functions have same effect):
+   ```json
+   {
+     "Elixir.IO.ANSI": "*p"
+   }
+   ```
+
+   **Wildcard with overrides** (most functions same, some different):
+   ```json
+   {
+     "Elixir.Macro": {
+       "*": "p",
+       "unique_var/2": "d"
+     }
+   }
+   ```
+
+4. **Regenerate merged registry**:
+   ```bash
+   mix litmus.merge_explicit
+   ```
+
+5. **Test**: Add test case verifying correct classification
+6. **Document**: Update documentation if adding new effect category
+
+**When to use wildcards**:
+- Pure utility modules (escape codes, formatting functions)
+- Exception struct modules (all `__struct__/0`, `message/1` functions are pure)
+- Modules where most/all functions share the same effect type
 
 ### Effect Type Guidelines
 
@@ -733,6 +828,17 @@ All public functions must have:
 - `@spec` with type signature
 - Examples showing usage
 - Notes about limitations or edge cases
+
+### Commit Message Guidelines
+
+**IMPORTANT**: Never include these lines in commit messages:
+```
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+These attribution lines should be omitted from all commits in this project.
 
 ---
 
