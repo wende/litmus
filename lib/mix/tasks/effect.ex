@@ -97,7 +97,7 @@ defmodule Mix.Tasks.Effect do
     end
 
     # Step 1: Load or analyze dependencies
-    deps_cache = load_or_analyze_deps()
+    deps_cache = load_or_analyze_deps(opts)
 
     # Step 2: Discover all application source files
     app_files = discover_app_files()
@@ -114,9 +114,11 @@ defmodule Mix.Tasks.Effect do
     app_files = (app_files ++ sibling_files ++ [absolute_path])
                 |> Enum.uniq()
 
-    Mix.shell().info(
-      "Analyzing #{length(app_files)} application files for cross-module effects...\n"
-    )
+    unless opts[:json] do
+      Mix.shell().info(
+        "Analyzing #{length(app_files)} application files for cross-module effects...\n"
+      )
+    end
 
     # Step 2.7: Set dependency cache in registry BEFORE analysis
     Litmus.Effects.Registry.set_runtime_cache(deps_cache)
@@ -130,7 +132,10 @@ defmodule Mix.Tasks.Effect do
 
         # Extract effect cache from results
         effect_cache = extract_project_cache(project_results)
-        Mix.shell().info("Built effect cache with #{map_size(effect_cache)} functions\n")
+
+        unless opts[:json] do
+          Mix.shell().info("Built effect cache with #{map_size(effect_cache)} functions\n")
+        end
 
         # Step 4: Merge dependency and application caches
         full_cache = Map.merge(deps_cache, effect_cache)
@@ -139,7 +144,9 @@ defmodule Mix.Tasks.Effect do
         Litmus.Effects.Registry.set_runtime_cache(full_cache)
 
         # Step 6: Get analysis for the requested file
-        Mix.shell().info("Displaying results for: #{path}\n")
+        unless opts[:json] do
+          Mix.shell().info("Displaying results for: #{path}\n")
+        end
 
         # Find the module in the results
         result = find_analysis_for_file(path, project_results)
@@ -269,7 +276,7 @@ defmodule Mix.Tasks.Effect do
     end
   end
 
-  defp load_or_analyze_deps do
+  defp load_or_analyze_deps(opts) do
     # Calculate current dependency checksum
     current_checksum = calculate_deps_checksum()
 
@@ -283,7 +290,9 @@ defmodule Mix.Tasks.Effect do
 
     # If checksum matches and cache exists, load from cache
     if current_checksum == cached_checksum and File.exists?(@deps_cache_path) do
-      Mix.shell().info("Loading dependency effects from cache...")
+      unless opts[:json] do
+        Mix.shell().info("Loading dependency effects from cache...")
+      end
 
       case File.read(@deps_cache_path) do
         {:ok, content} ->
@@ -292,17 +301,19 @@ defmodule Mix.Tasks.Effect do
 
         _ ->
           # Cache corrupted, re-analyze
-          analyze_and_cache_deps(current_checksum)
+          analyze_and_cache_deps(current_checksum, opts)
       end
     else
       # Checksum changed or no cache, re-analyze
-      if cached_checksum do
-        Mix.shell().info("Dependency checksum changed, re-analyzing dependencies...")
-      else
-        Mix.shell().info("Analyzing dependencies for the first time...")
+      unless opts[:json] do
+        if cached_checksum do
+          Mix.shell().info("Dependency checksum changed, re-analyzing dependencies...")
+        else
+          Mix.shell().info("Analyzing dependencies for the first time...")
+        end
       end
 
-      analyze_and_cache_deps(current_checksum)
+      analyze_and_cache_deps(current_checksum, opts)
     end
   end
 
@@ -347,7 +358,7 @@ defmodule Mix.Tasks.Effect do
     :erlang.phash2(checksum_data) |> Integer.to_string(16)
   end
 
-  defp analyze_and_cache_deps(checksum) do
+  defp analyze_and_cache_deps(checksum, opts) do
     # Discover all dependency source files
     dep_files = discover_dependency_files()
 
@@ -364,7 +375,9 @@ defmodule Mix.Tasks.Effect do
 
       cache
     else
-      Mix.shell().info("Analyzing #{length(dep_files)} dependency source files...")
+      unless opts[:json] do
+        Mix.shell().info("Analyzing #{length(dep_files)} dependency source files...")
+      end
 
       # Analyze dependencies using project analyzer
       case Analyzer.analyze_project(dep_files, verbose: false) do
@@ -372,7 +385,9 @@ defmodule Mix.Tasks.Effect do
           # Extract effects from results
           cache = extract_project_cache(results)
 
-          Mix.shell().info("Cached #{map_size(cache)} dependency functions")
+          unless opts[:json] do
+            Mix.shell().info("Cached #{map_size(cache)} dependency functions")
+          end
 
           # Ensure .effects directory exists
           File.mkdir_p!(".effects")
@@ -766,7 +781,7 @@ defmodule Mix.Tasks.Effect do
             effect: Formatter.format_effect(analysis.effect),
             compact_effect: Core.to_compact_effect(analysis.effect) |> compact_effect_to_json(),
             all_effects: Core.extract_all_effects(analysis.effect) |> all_effects_to_json(),
-            effect_labels: Effects.to_list(analysis.effect),
+            effect_labels: Effects.to_list(analysis.effect) |> effect_labels_to_json(),
             is_pure: Effects.is_pure?(analysis.effect),
             type: Formatter.format_type(analysis.type),
             return_type: Formatter.format_type(analysis.return_type),
@@ -819,4 +834,21 @@ defmodule Mix.Tasks.Effect do
   end
 
   defp all_effects_to_json(effect), do: [compact_effect_to_json(effect)]
+
+  # Convert effect_labels list to JSON-serializable format
+  # Effects.to_list returns tuples like {:s, [...]}, atoms, or :unknown
+  defp effect_labels_to_json(:unknown), do: "unknown"
+  defp effect_labels_to_json([]), do: []
+
+  defp effect_labels_to_json(labels) when is_list(labels) do
+    Enum.map(labels, fn
+      {:s, list} -> %{type: "s", calls: list}
+      {:d, list} -> %{type: "d", calls: list}
+      {:e, types} -> %{type: "e", exceptions: types}
+      atom when is_atom(atom) -> to_string(atom)
+      other -> inspect(other)
+    end)
+  end
+
+  defp effect_labels_to_json(other), do: inspect(other)
 end

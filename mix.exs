@@ -62,7 +62,9 @@ defmodule Litmus.MixProject do
       # Static type checker
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
       # Code coverage
-      {:excoveralls, "~> 0.18", only: :test}
+      {:excoveralls, "~> 0.18", only: :test},
+      # Property-based testing
+      {:stream_data, "~> 1.0", only: :test}
     ]
   end
 
