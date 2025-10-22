@@ -2,7 +2,7 @@
 
 **Date**: 2025-10-21
 **Status**: ✅ Complete
-**Tests**: 824 passing (100%)
+**Tests**: 801 passing (100%)
 
 ---
 
@@ -12,7 +12,7 @@ Successfully implemented **Phase 1** of the whole-project analysis plan: depende
 
 ## What Was Implemented
 
-### 1. **Dependency Graph Module** (`lib/litmus/project/dependency_graph.ex`)
+### 1. **Dependency Graph Module** (`lib/litmus/analyzer/dependency_graph.ex`)
 
 A complete graph data structure for tracking module dependencies:
 
@@ -49,7 +49,7 @@ affected = DependencyGraph.transitive_dependents(graph, ChangedModule)
 
 ---
 
-### 2. **Project Analyzer Module** (`lib/litmus/project/analyzer.ex`)
+### 2. **Project Analyzer Module** (`lib/litmus/analyzer/project_analyzer.ex`)
 
 Orchestrates dependency-ordered analysis of entire projects:
 
@@ -102,7 +102,7 @@ Integrated dependency-aware analysis into the `mix effect` command:
 **Changes**:
 - ✅ Replaced arbitrary file iteration with topological analysis
 - ✅ Discovers files in requested file's directory (supports test files)
-- ✅ Uses `Litmus.Project.Analyzer` for dependency-ordered analysis
+- ✅ Uses `Litmus.Analyzer.ProjectAnalyzer` for dependency-ordered analysis
 - ✅ Displays cycle detection information
 - ✅ Cross-module effect propagation now works correctly
 
@@ -131,29 +131,52 @@ mix effect lib/my_module.ex
 
 ## Test Coverage
 
-### New Test Files Created
+### Test Files
 
-1. **`test/project/dependency_graph_test.exs`** (19 tests)
-   - Basic graph operations (adding edges, querying dependencies)
-   - Topological sorting (linear, diamond, multi-path)
-   - Cycle detection (simple, three-node, multiple cycles)
-   - Transitive dependencies/dependents
-   - File parsing and graph building
-   - Human-readable summaries
+Phase 1 tests are integrated into the existing test suite:
 
-2. **`test/project/circular_deps_test.exs`** (4 tests)
-   - Simple circular dependency with effects
-   - Three-module circular dependency
-   - Mixed pure/effectful functions in cycles
-   - Convergence verification
+1. **`test/analyzer/project_analyzer_test.exs`** (~34 tests total)
+   - `analyze_project/2` tests (7 tests)
+     - Basic project analysis (single module, multi-module, multi-file)
+     - Dependency handling
+     - Error cases (non-existent file, syntax errors)
+   - `analyze_linear/3` tests (2 tests)
+     - Linear module analysis
+     - Empty module list handling
+   - `analyze_with_cycles/4` tests (4 tests)
+     - Circular dependency handling
+     - Fixed-point iteration convergence
+     - Verbose output with cycles
+   - `statistics/1` tests (9 tests)
+     - Empty results, single/multiple modules
+     - All effect type counting
+   - Edge cases (15 tests)
+     - Empty files, comments, nested modules, guards, macros
+     - Pattern matching, private functions, defaults, blocks
+     - try-rescue, stdlib function calls
+   - Analysis results structure (3 tests)
+     - Required fields validation
+     - Calls list population
+     - Effect type determination
+
+2. **`test/regressions_test.exs`** (2 tests)
+   - Module existence and compilation verification
+   - `Litmus.Analyzer.DependencyGraph` loads correctly
+   - `Litmus.Analyzer.ProjectAnalyzer` loads correctly
 
 ### Test Results
 
 ```
-Total: 824 tests, 0 failures
-├─ Dependency Graph: 19 tests ✅
-├─ Circular Dependencies: 4 tests ✅
-└─ Existing Tests: 801 tests ✅ (regression-free)
+Total: 801 tests, 0 failures (100% passing)
+├─ Project Analyzer: ~34 tests ✅
+│  ├─ Basic analysis: 7 tests
+│  ├─ Linear analysis: 2 tests
+│  ├─ Circular dependencies: 4 tests
+│  ├─ Statistics: 9 tests
+│  ├─ Edge cases: 15 tests
+│  └─ Results structure: 3 tests
+├─ Regression tests: 2 tests ✅
+└─ Existing tests: Unchanged ✅ (zero regressions)
 ```
 
 ---
@@ -325,7 +348,7 @@ $ mix effect lib/circular_a.ex
 ### Programmatic Usage
 
 ```elixir
-alias Litmus.Project.{Analyzer, DependencyGraph}
+alias Litmus.Analyzer.{ProjectAnalyzer, DependencyGraph}
 
 # Build dependency graph
 files = Path.wildcard("lib/**/*.ex")

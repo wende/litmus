@@ -174,6 +174,9 @@ defmodule Litmus.Types.Effects do
   """
   def has_effect?(_label, {:effect_empty}), do: false
   def has_effect?(label, {:effect_label, l}), do: label == l
+  # Exception effects match exn label
+  def has_effect?(:exn, {:e, _types}), do: true
+  def has_effect?(_label, {:e, _types}), do: false
   # Side effects don't match label queries
   def has_effect?(_label, {:s, _list}), do: false
   # Dependent effects don't match label queries
@@ -326,10 +329,11 @@ defmodule Litmus.Types.Effects do
           # Filter out non-effectful leaves - we only want to track concrete side effects
           # Exclude: pure (:p), lambda-dependent (:l), unknown (:u), nif (:n)
           # Include: side effects (:s), dependent (:d), exceptions (:e/:exn)
-          effectful_leaves = Enum.filter(leaves, fn leaf ->
-            leaf_effect_type = Litmus.Effects.Registry.effect_type(leaf)
-            leaf_effect_type not in [:p, :l, :u, :n]
-          end)
+          effectful_leaves =
+            Enum.filter(leaves, fn leaf ->
+              leaf_effect_type = Litmus.Effects.Registry.effect_type(leaf)
+              leaf_effect_type not in [:p, :l, :u, :n]
+            end)
 
           build_single_effect_with_leaves({mfa, effectful_leaves}, leaf_effect)
 

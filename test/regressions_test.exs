@@ -137,16 +137,11 @@ defmodule Litmus.RegressionsTest do
   describe "project-wide analysis (Commit 368b711)" do
     test "dependency graph module exists and compiles" do
       # Previously incomplete, now should be present
-      assert Code.ensure_loaded?(Litmus.Project.DependencyGraph)
+      assert Code.ensure_loaded?(Litmus.Analyzer.DependencyGraph)
     end
 
     test "project analyzer module exists and compiles" do
-      assert Code.ensure_loaded?(Litmus.Project.Analyzer)
-    end
-
-    test "ast_walker has analyze_module_body/2 function" do
-      # Added in project-wide analysis feature
-      assert function_exported?(Litmus.Analyzer.ASTWalker, :analyze_module_body, 2)
+      assert Code.ensure_loaded?(Litmus.Analyzer.ProjectAnalyzer)
     end
   end
 

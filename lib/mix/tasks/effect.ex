@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Effect do
 
   alias Litmus.Formatter
   alias Litmus.Types.{Core, Effects}
-  alias Litmus.Project.Analyzer
+  alias Litmus.Analyzer.ProjectAnalyzer
 
   # Stateful Kernel functions that should be displayed (rest are hidden as noise)
   @stateful_kernel_functions [
@@ -124,10 +124,10 @@ defmodule Mix.Tasks.Effect do
     Litmus.Effects.Registry.set_runtime_cache(deps_cache)
 
     # Step 3: Use dependency-aware project analyzer
-    case Analyzer.analyze_project(app_files, verbose: false) do
+    case ProjectAnalyzer.analyze_project(app_files, verbose: false) do
       {:ok, project_results} ->
-        # Note: Analyzer.analyze_project already builds the dependency graph internally
-        # TODO: Refactor to return graph from Analyzer.analyze_project to avoid rebuilding
+        # Note: ProjectAnalyzer.analyze_project already builds the dependency graph internally
+        # TODO: Refactor to return graph from ProjectAnalyzer.analyze_project to avoid rebuilding
         # (Skipping redundant graph building and missing modules warning for now)
 
         # Extract effect cache from results
@@ -380,7 +380,7 @@ defmodule Mix.Tasks.Effect do
       end
 
       # Analyze dependencies using project analyzer
-      case Analyzer.analyze_project(dep_files, verbose: false) do
+      case ProjectAnalyzer.analyze_project(dep_files, verbose: false) do
         {:ok, results} ->
           # Extract effects from results
           cache = extract_project_cache(results)

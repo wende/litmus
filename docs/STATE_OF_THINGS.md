@@ -230,7 +230,7 @@ Litmus.Effects.Registry.effect_type({Integer, :parse!, 1})
 **Discovery**: The diff shows extensive changes to `lib/mix/tasks/effect.ex` that were **not part of this bug fix**. These appear to be from a previous session and include:
 
 **New Features Added**:
-- Project-wide dependency analysis using `Litmus.Project.Analyzer`
+- Project-wide dependency analysis using `Litmus.Analyzer.ProjectAnalyzer`
 - Sibling file discovery for test files
 - Full dependency caching system (was empty stub)
 - Litmus version in cache checksum

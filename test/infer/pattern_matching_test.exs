@@ -3,7 +3,9 @@ defmodule Litmus.Infer.PatternMatchingTest do
   doctest Litmus.Types.Pattern
 
   alias Litmus.Types.Pattern
-  alias Litmus.Analyzer.ASTWalker
+
+  import Test.AnalysisHelpers
+  import Test.Factories
 
   describe "extract_variables/1" do
     test "extracts variable from simple variable pattern" do
@@ -60,7 +62,9 @@ defmodule Litmus.Infer.PatternMatchingTest do
 
     test "extracts variables from struct pattern" do
       # %User{name: n, age: a}
-      pattern = {:%, :_, [{:__aliases__, :_, [:User]}, [{:name, {:n, :_, nil}}, {:age, {:a, :_, nil}}]]}
+      pattern =
+        {:%, :_, [{:__aliases__, :_, [:User]}, [{:name, {:n, :_, nil}}, {:age, {:a, :_, nil}}]]}
+
       assert Enum.sort(Pattern.extract_variables(pattern)) == [:a, :n]
     end
 
@@ -206,67 +210,46 @@ defmodule Litmus.Infer.PatternMatchingTest do
   # Integration tests with actual lambda analysis
   describe "lambda pattern matching integration" do
     test "simple lambda works (baseline)" do
-      source = """
-      defmodule Test do
-        def map_simple(items) do
-          Enum.map(items, fn x -> x * 2 end)
-        end
-      end
-      """
+      source =
+        create_module_source(
+          Test,
+          "def map_simple(items), do: Enum.map(items, fn x -> x * 2 end)"
+        )
 
-      {:ok, ast} = Code.string_to_quoted(source)
-      {:ok, result} = ASTWalker.analyze_ast(ast)
-
-      # Should have analyzed the function
-      func = result.functions[{Test, :map_simple, 1}]
-      refute is_nil(func)
+      result = assert_analysis_completes(source)
+      assert get_function_analysis(result, {Test, :map_simple, 1})
     end
 
     test "lambda with tuple destructuring should work after enhancement" do
-      source = """
-      defmodule Test do
-        def map_tuple(items) do
-          Enum.map(items, fn {a, b} -> a + b end)
-        end
-      end
-      """
+      source =
+        create_module_source(
+          Test,
+          "def map_tuple(items), do: Enum.map(items, fn {a, b} -> a + b end)"
+        )
 
-      {:ok, ast} = Code.string_to_quoted(source)
-      # This should not crash - pattern extraction should handle it
-      {:ok, _result} = ASTWalker.analyze_ast(ast)
+      assert_analysis_completes(source)
     end
 
     test "lambda with list destructuring should work after enhancement" do
-      source = """
-      defmodule Test do
-        def map_list(items) do
-          Enum.map(items, fn [h|t] -> h end)
-        end
-      end
-      """
+      source =
+        create_module_source(Test, "def map_list(items), do: Enum.map(items, fn [h|t] -> h end)")
 
-      {:ok, ast} = Code.string_to_quoted(source)
-      # This should not crash - pattern extraction should handle it
-      {:ok, _result} = ASTWalker.analyze_ast(ast)
+      assert_analysis_completes(source)
     end
 
     test "lambda with map destructuring should work after enhancement" do
-      source = """
-      defmodule Test do
-        def map_map(items) do
-          Enum.map(items, fn %{key: val} -> val end)
-        end
-      end
-      """
+      source =
+        create_module_source(
+          Test,
+          "def map_map(items), do: Enum.map(items, fn %{key: val} -> val end)"
+        )
 
-      {:ok, ast} = Code.string_to_quoted(source)
-      # This should not crash - pattern extraction should handle it
-      {:ok, _result} = ASTWalker.analyze_ast(ast)
+      assert_analysis_completes(source)
     end
 
     test "multi-clause lambda should work after enhancement" do
-      source = """
-      defmodule Test do
+      source =
+        create_module_source(Test, """
         def factorial(n) do
           f = fn
             0 -> 1
@@ -274,12 +257,9 @@ defmodule Litmus.Infer.PatternMatchingTest do
           end
           f.(n)
         end
-      end
-      """
+        """)
 
-      {:ok, ast} = Code.string_to_quoted(source)
-      # Multi-clause lambdas should work
-      {:ok, _result} = ASTWalker.analyze_ast(ast)
+      assert_analysis_completes(source)
     end
   end
 

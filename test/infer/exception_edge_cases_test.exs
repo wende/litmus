@@ -6,26 +6,8 @@ defmodule ExceptionEdgeCasesTest do
   - Custom exception modules
   """
 
-  # ============================================================================
-  # Custom Exception Modules
-  # ============================================================================
-
-  defmodule CustomError do
-    defexception [:message]
-  end
-
-  defmodule DomainError do
-    defexception [:message, :domain]
-  end
-
-  defmodule ValidationError do
-    defexception [:field, :reason]
-
-    @impl true
-    def message(%{field: field, reason: reason}) do
-      "Validation error: #{field} - #{reason}"
-    end
-  end
+  # Import shared test exceptions
+  alias Test.Exceptions.{CustomError, DomainError, ValidationError}
 
   # ============================================================================
   # Basic Custom Exception Raises

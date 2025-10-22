@@ -1,4 +1,4 @@
-defmodule Litmus.Project.Analyzer do
+defmodule Litmus.Analyzer.ProjectAnalyzer do
   @moduledoc """
   Project-wide analyzer that handles dependency-ordered analysis.
 
@@ -12,12 +12,12 @@ defmodule Litmus.Project.Analyzer do
 
       # Analyze all files in a project
       files = ["lib/a.ex", "lib/b.ex", "lib/c.ex"]
-      {:ok, results} = Litmus.Project.Analyzer.analyze_project(files)
+      {:ok, results} = Litmus.Analyzer.ProjectAnalyzer.analyze_project(files)
 
       # Results is a map: %{module => analysis_result}
   """
 
-  alias Litmus.Project.DependencyGraph
+  alias Litmus.Analyzer.DependencyGraph
   alias Litmus.Analyzer.ASTWalker
   alias Litmus.Effects.Registry
   alias Litmus.Types.Core

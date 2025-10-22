@@ -4,7 +4,6 @@
 
 **Last Updated**: 2025-10-21
 **Project Version**: v0.1.0
-**Test Status**: ✅ 801 tests passing (100%)
 
 ---
 
@@ -37,11 +36,6 @@ Litmus is a comprehensive static analysis tool for Elixir that provides **four p
 - **87.30%** of Elixir stdlib functions are pure
 - **3,243** stdlib functions analyzed
 - **134** modules in stdlib coverage
-- **801** tests passing with comprehensive coverage
-  - 48 pattern matching tests
-  - 20 lambda pattern tests
-  - 21 function definition pattern tests
-  - 90+ other feature tests
 - **10** Kernel functions with specific exception types tracked
 
 ### Theoretical Foundation

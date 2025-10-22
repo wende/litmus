@@ -485,6 +485,39 @@ defmodule Litmus.Effects.Registry do
                   end
                 end
 
+              # JSON format from runtime cache (strings and maps)
+              "p" ->
+                :p
+
+              "d" ->
+                :d
+
+              "l" ->
+                :l
+
+              "n" ->
+                :n
+
+              "s" ->
+                :s
+
+              "u" ->
+                :u
+
+              "e" ->
+                :e
+
+              %{"e" => ["exn"]} ->
+                :exn
+
+              %{"e" => types} ->
+                # Prefix exception types with "Elixir." if not already prefixed
+                prefixed_types = Enum.map(types, fn
+                  "Elixir." <> _ = type -> type
+                  type -> "Elixir.#{type}"
+                end)
+                {:e, prefixed_types}
+
               # Runtime cache stores compact effects (atoms/tuples), return directly
               cached_effect when is_atom(cached_effect) or is_tuple(cached_effect) ->
                 cached_effect

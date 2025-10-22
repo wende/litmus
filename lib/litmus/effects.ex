@@ -64,16 +64,6 @@ defmodule Litmus.Effects do
         {IO, :puts, [msg]} -> :ok
       end
 
-  ## Options
-
-  You can also pass options before the do/catch block:
-
-      effect track: [:file] do
-        File.read!("test.txt")
-      catch
-        {File, :read!, _} -> "mocked"
-      end
-
   ## Examples
 
       # Basic usage
@@ -138,7 +128,7 @@ defmodule Litmus.Effects do
 
   # effect/2 clauses - two argument forms with options
 
-  # effect track: [:file] do ... catch ... rescue ... end
+  # effect do ... catch ... rescue ... end (with options)
   defmacro effect(opts, do: code_block, catch: catch_clauses, rescue: rescue_clauses)
            when is_list(catch_clauses) and is_list(rescue_clauses) do
     build_effect_with_handler_and_rescue(
@@ -150,17 +140,17 @@ defmodule Litmus.Effects do
     )
   end
 
-  # effect track: [:file] do ... catch ... end
+  # effect do ... catch ... end (with options)
   defmacro effect(opts, do: code_block, catch: catch_clauses) when is_list(catch_clauses) do
     build_effect_with_handler(code_block, catch_clauses, opts, __CALLER__)
   end
 
-  # effect track: [:file] do ... catch: handler_fn
+  # effect do ... catch: handler_fn (with options)
   defmacro effect(opts, do: code_block, catch: handler_fn) do
     build_effect_with_external_handler(code_block, handler_fn, opts, __CALLER__)
   end
 
-  # Legacy support: effect track: [:file] do ... end (returns function)
+  # Legacy support: effect do ... end (returns function, with options)
   defmacro effect(opts, do: block) when is_list(opts) do
     build_effect_function(block, opts, __CALLER__)
   end

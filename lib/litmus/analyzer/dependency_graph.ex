@@ -1,4 +1,4 @@
-defmodule Litmus.Project.DependencyGraph do
+defmodule Litmus.Analyzer.DependencyGraph do
   @moduledoc """
   Builds and analyzes dependency graphs for Elixir projects.
 
@@ -25,7 +25,7 @@ defmodule Litmus.Project.DependencyGraph do
       #=> [[ModuleX, ModuleY]]  # If X and Y depend on each other
   """
 
-  alias Litmus.Project.DependencyGraph
+  alias Litmus.Analyzer.DependencyGraph
 
   @type module_name :: module()
   @type t :: %__MODULE__{

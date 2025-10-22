@@ -3,85 +3,38 @@ defmodule Litmus.Analyzer.FunctionPatternTest do
 
   alias Litmus.Analyzer.ASTWalker
 
+  import Test.AnalysisHelpers
+  import Test.Factories
+
   describe "function definition pattern matching" do
     test "function with simple variable parameters" do
-      source = """
-      defmodule Test do
-        def add(x, y) do
-          x + y
-        end
-      end
-      """
-
-      {:ok, ast} = Code.string_to_quoted(source)
-      {:ok, result} = ASTWalker.analyze_ast(ast)
-
-      func = result.functions[{Test, :add, 2}]
-      assert func != nil
+      source = create_module_source(Test, function_pattern_definitions().simple_vars)
+      result = assert_analysis_completes(source)
+      assert get_function_analysis(result, {Test, :add, 2})
     end
 
     test "function with tuple pattern parameter" do
-      source = """
-      defmodule Test do
-        def process({a, b}) do
-          a + b
-        end
-      end
-      """
-
-      {:ok, ast} = Code.string_to_quoted(source)
-      {:ok, result} = ASTWalker.analyze_ast(ast)
-
-      func = result.functions[{Test, :process, 1}]
-      assert func != nil
+      source = create_module_source(Test, function_pattern_definitions().tuple_param)
+      result = assert_analysis_completes(source)
+      assert get_function_analysis(result, {Test, :process_tuple, 1})
     end
 
     test "function with nested tuple pattern" do
-      source = """
-      defmodule Test do
-        def deep_process({{a, b}, c}) do
-          a + b + c
-        end
-      end
-      """
-
-      {:ok, ast} = Code.string_to_quoted(source)
-      {:ok, result} = ASTWalker.analyze_ast(ast)
-
-      func = result.functions[{Test, :deep_process, 1}]
-      assert func != nil
+      source = create_module_source(Test, function_pattern_definitions().nested_tuple)
+      result = assert_analysis_completes(source)
+      assert get_function_analysis(result, {Test, :deep, 1})
     end
 
     test "function with list pattern parameter" do
-      source = """
-      defmodule Test do
-        def head_tail([h|t]) do
-          h
-        end
-      end
-      """
-
-      {:ok, ast} = Code.string_to_quoted(source)
-      {:ok, result} = ASTWalker.analyze_ast(ast)
-
-      func = result.functions[{Test, :head_tail, 1}]
-      assert func != nil
+      source = create_module_source(Test, function_pattern_definitions().list_param)
+      result = assert_analysis_completes(source)
+      assert get_function_analysis(result, {Test, :head_tail, 1})
     end
 
     test "function with map pattern parameter" do
-      source = """
-      defmodule Test do
-        def extract_name(%{name: n, age: a}) do
-          n
-        end
-      end
-      """
-
-      {:ok, ast} = Code.string_to_quoted(source)
-      {:ok, result} = ASTWalker.analyze_ast(ast)
-
-      func = result.functions[{Test, :extract_name, 1}]
-      assert func != nil
+      source = create_module_source(Test, function_pattern_definitions().map_param)
+      result = assert_analysis_completes(source)
+      assert get_function_analysis(result, {Test, :extract_name, 1})
     end
 
     test "function with multiple pattern parameters" do
