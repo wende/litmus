@@ -277,54 +277,6 @@ defmodule Litmus.Analyzer.EffectTracker do
     |> Enum.into(%{})
   end
 
-  @doc """
-  Suggests effect handlers for unhandled effects.
-
-  Given an AST with effects, suggests appropriate handlers.
-  """
-  def suggest_handlers(ast) do
-    effects = analyze_effects(ast)
-    effect_list = Effects.to_list(effects)
-
-    case effect_list do
-      :unknown ->
-        [{:unknown, "Cannot determine specific handlers for unknown effects"}]
-
-      [] ->
-        []
-
-      labels ->
-        Enum.map(labels, fn label ->
-          {label, suggest_handler_for_label(label)}
-        end)
-    end
-  end
-
-  defp suggest_handler_for_label(label) do
-    case label do
-      :io ->
-        "Consider mocking IO operations or using a test-specific IO handler"
-
-      :file ->
-        "Consider using in-memory file system or mocking file operations"
-
-      :process ->
-        "Consider using supervised test processes or mocking process operations"
-
-      :state ->
-        "Consider using controlled state containers or pure state transformations"
-
-      :network ->
-        "Consider using mock servers or network stubs"
-
-      :exn ->
-        "Consider adding try-catch blocks or using error monads"
-
-      _ ->
-        "Consider creating a custom handler for this effect"
-    end
-  end
-
   # Resolve module from AST
   defp resolve_module({:__aliases__, _, parts}) do
     Module.concat(parts)

@@ -21,8 +21,8 @@ We've successfully implemented a CPS (Continuation-Passing Style) based algebrai
    - Tail-call optimization for final effects
 
 3. **`Litmus.Effects.Registry`** (`lib/litmus/effects/registry.ex`)
-   - Catalog of known side-effectful functions
-   - Effect categorization (`:io`, `:file`, `:process`, etc.)
+   - Catalog of known side-effectful functions by MFA
+   - Effect type classification (pure, side effects, exceptions, etc.)
    - 20+ effect modules registered
 
 ### How It Works

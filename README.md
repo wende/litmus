@@ -241,24 +241,7 @@ catch
     assert path == "log.txt"  # Can inspect arguments
     :ok
 end
-
-# Selective effect tracking - only track specific categories
-effect track: [:file] do
-  File.read!("test.txt")
-  IO.puts("Debug")  # Not tracked, executes normally
-catch
-  {File, :read!, _} -> "mocked"
-end
 ```
-
-**Effect Categories:**
-
-- **`:file`** - File operations (`File`, `Path`)
-- **`:io`** - Console I/O (`IO`)
-- **`:network`** - HTTP, TCP, UDP operations
-- **`:process`** - Process spawning and messaging
-- **`:database`** - Database operations (`Ecto`, `Repo`)
-- **`:exception`** - Exception-raising Kernel functions (`hd/1`, `elem/2`, `div/2`, etc.)
 
 **Testing Benefits:**
 - No filesystem access, no network calls, deterministic tests
@@ -720,7 +703,7 @@ This implementation demonstrates concepts from the [Litmus whitepaper](./whitepa
 - [x] **Effect handlers** - Mock and intercept side effects for testing
 - [x] **Control flow transformation** - `if/else` expressions with effects
 - [x] **Anonymous function support** - Transform closures with effects in their bodies
-- [x] **Effect tracking options** - Selective effect tracking by category (`:file`, `:io`, `:network`, etc.)
+- [x] **Effect tracking** - Full effect tracking for testing and analysis
 - [x] **Bidirectional type inference** - Infers effect types from source code with lambda effect propagation
 - [x] **Higher-order function support** - Correctly analyzes effects in `Enum.map`, `Enum.filter`, callbacks, etc.
 - [x] **Mix task** - `mix effect` command for analyzing Elixir files with cross-module effect tracking

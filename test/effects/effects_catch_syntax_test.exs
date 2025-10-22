@@ -109,6 +109,10 @@ defmodule Litmus.EffectsNewApiTest do
   end
 
   describe "branching with effects" do
+    # Note: The "always yields same result" warnings in these tests are intentional.
+    # We use literal true/false to test that the effect system correctly handles
+    # each branch of conditional expressions during CPS transformation.
+
     test "if with effect in true branch" do
       result =
         effect do

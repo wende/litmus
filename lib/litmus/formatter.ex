@@ -154,6 +154,7 @@ defmodule Litmus.Formatter do
   defp format_first_label({:s, list}), do: Enum.join(list, " | ")
   defp format_first_label({:d, list}), do: Enum.join(list, " | ")
   defp format_first_label({:e, types}), do: format_exception_types(types)
+  defp format_first_label({:effect_var, name}), do: "?#{name}"
   defp format_first_label(label), do: "#{label}"
 
   defp format_effect_tail({:effect_empty}), do: ""

@@ -764,8 +764,8 @@ defmodule Mix.Tasks.Effect do
             name: f,
             arity: a,
             effect: Formatter.format_effect(analysis.effect),
-            compact_effect: Core.to_compact_effect(analysis.effect),
-            all_effects: Core.extract_all_effects(analysis.effect),
+            compact_effect: Core.to_compact_effect(analysis.effect) |> compact_effect_to_json(),
+            all_effects: Core.extract_all_effects(analysis.effect) |> all_effects_to_json(),
             effect_labels: Effects.to_list(analysis.effect),
             is_pure: Effects.is_pure?(analysis.effect),
             type: Formatter.format_type(analysis.type),
@@ -792,4 +792,31 @@ defmodule Mix.Tasks.Effect do
 
     Mix.shell().info(Jason.encode!(json_result, pretty: true))
   end
+
+  # Convert compact effect to JSON-serializable format
+  defp compact_effect_to_json(:p), do: "p"
+  defp compact_effect_to_json(:l), do: "l"
+  defp compact_effect_to_json(:d), do: "d"
+  defp compact_effect_to_json(:u), do: "u"
+  defp compact_effect_to_json(:n), do: "n"
+  defp compact_effect_to_json({:s, list}), do: %{type: "s", calls: list}
+  defp compact_effect_to_json({:d, list}), do: %{type: "d", calls: list}
+  defp compact_effect_to_json({:e, types}), do: %{type: "e", exceptions: types}
+  defp compact_effect_to_json(other), do: inspect(other)
+
+  # Convert all_effects to JSON-serializable format
+  defp all_effects_to_json(effects) when is_list(effects) do
+    Enum.map(effects, fn
+      {:s, list} -> %{type: "s", calls: list}
+      {:d, list} -> %{type: "d", calls: list}
+      {:e, types} -> %{type: "e", exceptions: types}
+      :p -> "p"
+      :l -> "l"
+      :u -> "u"
+      :n -> "n"
+      other -> inspect(other)
+    end)
+  end
+
+  defp all_effects_to_json(effect), do: [compact_effect_to_json(effect)]
 end

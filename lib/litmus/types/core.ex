@@ -36,30 +36,12 @@ defmodule Litmus.Types.Core do
           | {:forall, list(type_var() | effect_var()), elixir_type()}
 
   # Effect types using row polymorphism
-  # No effects
   @type effect_label ::
           :pure
-          # Can raise exceptions
           | :exn
-          # I/O operations
-          | :io
-          # File system operations
-          | :file
-          # Process operations (spawn, send, receive)
-          | :process
-          # Stateful operations
-          | :state
-          # Native implemented functions
           | :nif
-          # Network operations
-          | :network
-          # ETS table operations
-          | :ets
-          # Time-dependent operations
-          | :time
-          # Random number generation
-          | :random
-          # Unknown effect (for gradual typing)
+          | :lambda
+          | :dependent
           | :unknown
 
   # ⟨⟩ - pure
@@ -361,10 +343,6 @@ defmodule Litmus.Types.Core do
       :unknown in labels ->
         :u
 
-      # Has old-style side effects (shouldn't happen with new code, but kept for compatibility)
-      has_side_effects?(labels) ->
-        :s
-
       # Lambda-dependent (effects depend on lambda arguments)
       :lambda in labels ->
         :l
@@ -417,11 +395,6 @@ defmodule Litmus.Types.Core do
     end)
   end
 
-  # Check if labels contain any old-style side-effecting operations (for compatibility)
-  defp has_side_effects?(labels) do
-    side_effect_labels = [:io, :file, :process, :network, :state, :ets, :time, :random]
-    Enum.any?(labels, fn label -> label in side_effect_labels end)
-  end
 
   @doc """
   Extracts all distinct effect types from an effect row and returns them as a list.

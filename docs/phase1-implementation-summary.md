@@ -86,8 +86,8 @@ Orchestrates dependency-ordered analysis of entire projects:
 {:ok, results} = Analyzer.analyze_project(files)
 results[MyModule].functions[{MyModule, :func, 1}]
 #=> %{
-#=>   effect: {:effect_label, :io},
-#=>   type: {:function, :any, {:effect_label, :io}, :any},
+#=>   effect: {:s, ["IO.puts/1"]},
+#=>   type: {:function, :any, {:s, ["IO.puts/1"]}, :any},
 #=>   calls: [{IO, :puts, 1}],
 #=>   ...
 #=> }

@@ -71,11 +71,11 @@ The Litmus Type and Effect System implements a sophisticated bidirectional type 
 The system uses row polymorphism with duplicate labels, following Koka's approach:
 
 ```elixir
-# Single effect
-{:effect_label, :io}  # ⟨io⟩
+# Side effects with specific MFAs
+{:s, ["File.read/1"]}  # ⟨s(File.read/1)⟩
 
-# Effect row with extension
-{:effect_row, :exn, {:effect_label, :io}}  # ⟨exn | io⟩
+# Effect row with exception and side effects
+{:effect_row, {:e, ["Elixir.ArgumentError"]}, {:s, ["File.read/1"]}}  # ⟨e(ArgumentError) | s(File.read/1)⟩
 
 # Duplicate labels for nested handlers
 {:effect_row, :exn, {:effect_row, :exn, {:effect_empty}}}  # ⟨exn | exn⟩
@@ -95,23 +95,18 @@ catch
 end
 ```
 
-### Effect Categories
+### Effect Types
 
-The system tracks various effect types:
+The system tracks these effect types:
 
 - **`:pure`** - No side effects
 - **`:exn`** - Can raise exceptions (generic)
 - **`{:e, [modules]}`** - Can raise specific exception types (e.g., ArgumentError, KeyError)
 - **`{:e, [:dynamic]}`** - Can raise exceptions with runtime-determined types
-- **`:io`** - I/O operations
-- **`:file`** - File system operations
-- **`:process`** - Process operations (spawn, send, receive)
-- **`:state`** - Stateful operations
+- **`{:s, [MFAs]}`** - Side effects with specific function tracking
+- **`{:d, [MFAs]}`** - Dependent effects (environment-dependent) with specific function tracking
 - **`:nif`** - Native implemented functions
-- **`:network`** - Network operations
-- **`:ets`** - ETS table operations
-- **`:time`** - Time-dependent operations
-- **`:random`** - Random number generation
+- **`:lambda`** - Effects depend on passed lambda functions
 - **`:unknown`** - Unknown effect (gradual typing)
 
 ### Bidirectional Type Inference
@@ -198,8 +193,8 @@ fun_type = Litmus.Types.Core.function_type(:int, Core.empty_effect(), :string)
 
 # Create effects
 pure = Litmus.Types.Core.empty_effect()
-io_effect = Litmus.Types.Core.single_effect(:io)
-combined = Litmus.Types.Effects.combine_effects(io_effect, file_effect)
+side_effect = {:s, ["IO.puts/1"]}
+combined = {:effect_row, side_effect, {:e, ["Elixir.ArgumentError"]}}
 
 # Unification
 {:ok, subst} = Litmus.Types.Unification.unify({:type_var, :a}, :int)

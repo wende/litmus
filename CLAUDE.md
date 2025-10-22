@@ -389,16 +389,7 @@ end)
 **Key Features**:
 - Control flow with effects (if/else)
 - Variable capture in handlers
-- Selective effect tracking by category (`:file`, `:io`, `:network`, etc.)
 - Zero runtime overhead (compile-time transformation)
-
-**Effect Categories**:
-- **`:file`** - File operations (`File`, `Path`)
-- **`:io`** - Console I/O (`IO`)
-- **`:network`** - HTTP, TCP, UDP operations
-- **`:process`** - Process spawning and messaging
-- **`:database`** - Database operations (`Ecto`, `Repo`)
-- **`:exception`** - Exception-raising Kernel functions
 
 ### 4. Bidirectional Type Inference
 
@@ -473,11 +464,11 @@ mix effect lib/my_module.ex --purity
 The system uses **row polymorphism with duplicate labels**, following Koka's approach:
 
 ```elixir
-# Single effect
-{:effect_label, :io}  # ⟨io⟩
+# Side effects with specific MFAs
+{:s, ["File.read/1"]}  # ⟨s(File.read/1)⟩
 
-# Effect row with extension
-{:effect_row, :exn, {:effect_label, :io}}  # ⟨exn | io⟩
+# Effect row with exception and side effects
+{:effect_row, {:e, ["Elixir.ArgumentError"]}, {:s, ["File.read/1"]}}  # ⟨e(ArgumentError) | s(File.read/1)⟩
 
 # Duplicate labels for nested handlers
 {:effect_row, :exn, {:effect_row, :exn, {:effect_empty}}}  # ⟨exn | exn⟩
@@ -497,21 +488,6 @@ catch
   :outer -> handle_outer()  # Removes outer exception effect
 end
 ```
-
-### Effect Categories Tracked
-
-- **`:pure`** - No side effects
-- **`:exn`** - Can raise exceptions
-- **`:io`** - I/O operations
-- **`:file`** - File system operations
-- **`:process`** - Process operations (spawn, send, receive)
-- **`:state`** - Stateful operations
-- **`:nif`** - Native implemented functions
-- **`:network`** - Network operations
-- **`:ets`** - ETS table operations
-- **`:time`** - Time-dependent operations
-- **`:random`** - Random number generation
-- **`:unknown`** - Unknown effect (gradual typing)
 
 ### Bidirectional Type Inference
 
@@ -566,12 +542,12 @@ end
 
 # Analyzing this function:
 # - Captured effect: empty (target is pure data)
-# - Return effect: :io (from IO.puts)
-# - Closure type: {:closure, :string, {:effect_empty}, {:effect_label, :io}}
+# - Return effect: side effects from IO.puts/1
+# - Closure type: {:closure, :string, {:effect_empty}, {:s, ["IO.puts/1"]}}
 
 # When the closure is called:
 logger = make_logger("MyApp")
-logger.("Hello")  # Knows this has :io effect
+logger.("Hello")  # Knows this has side effects
 ```
 
 **Key Differences from Function Types**:
