@@ -88,6 +88,16 @@ defmodule Litmus.Analyzer.ASTWalker do
     end
   end
 
+  @doc """
+  Analyzes a module body AST given the module name.
+
+  This is useful when analyzing source files that contain multiple modules.
+  """
+  def analyze_module_body(module_name, body) do
+    ensure_var_gen_started()
+    analyze_module(module_name, body)
+  end
+
   # Analyze module contents
   defp analyze_module(module_name, {:__block__, _, definitions}) do
     analyze_module(module_name, definitions)

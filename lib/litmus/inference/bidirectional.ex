@@ -356,7 +356,7 @@ defmodule Litmus.Inference.Bidirectional do
     # Synthesize the function variable to get its type
     case synthesize(func_var, context) do
       # Handle closure types: extract return_effect
-      {:ok, {:closure, _param_type, captured_effect, return_effect}, _var_effect, var_subst} ->
+      {:ok, {:closure, _param_type, _captured_effect, return_effect}, _var_effect, var_subst} ->
         # A closure being called - use return_effect and combine with captured_effect
         # The captured_effect represents effects from creating the closure, which already happened
         # So we only apply the return_effect when the closure is called
@@ -610,48 +610,6 @@ defmodule Litmus.Inference.Bidirectional do
 
         _ ->
           node
-      end
-    end)
-  end
-
-  # Extract all variable names referenced in an AST expression
-  defp extract_variables_in_expr(expr) do
-    {_ast, vars} =
-      Macro.prewalk(expr, MapSet.new(), fn node, acc ->
-        case node do
-          # Variable reference (third element is context, usually Elixir or nil)
-          {name, _, context_atom} when is_atom(name) and is_atom(context_atom) ->
-            {node, MapSet.put(acc, name)}
-
-          _ ->
-            {node, acc}
-        end
-      end)
-
-    vars
-  end
-
-  # Extract captured variables: variables referenced in body but not in params
-  defp extract_captured_vars(body, params) do
-    vars_in_body = extract_variables_in_expr(body)
-    param_names = Pattern.extract_variables_from_list(params) |> MapSet.new()
-    MapSet.difference(vars_in_body, param_names)
-  end
-
-  # Calculate the combined effect from captured variables
-  # by looking them up in the context
-  defp captured_variables_effect(captured_names, context) do
-    Enum.reduce(captured_names, Core.empty_effect(), fn var_name, acc_effect ->
-      # Look up the variable in context to see if it has effects
-      case Context.lookup(context, var_name) do
-        {:ok, _var_type} ->
-          # For now, we assume captured variables are pure values
-          # (their effects are already accounted for in their definitions)
-          acc_effect
-
-        :error ->
-          # Unknown variable - assume pure
-          acc_effect
       end
     end)
   end

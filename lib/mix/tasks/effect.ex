@@ -39,9 +39,9 @@ defmodule Mix.Tasks.Effect do
 
   use Mix.Task
 
-  alias Litmus.Analyzer.ASTWalker
   alias Litmus.Formatter
   alias Litmus.Types.{Core, Effects}
+  alias Litmus.Project.Analyzer
 
   # Stateful Kernel functions that should be displayed (rest are hidden as noise)
   @stateful_kernel_functions [
@@ -102,60 +102,108 @@ defmodule Mix.Tasks.Effect do
     # Step 2: Discover all application source files
     app_files = discover_app_files()
 
+    # Step 2.5: Discover files in the same directory as the requested file
+    # (for test files or modules outside lib/)
+    absolute_path = Path.absname(path)
+    file_dir = Path.dirname(absolute_path)
+
+    # Find all .ex files in the same directory
+    sibling_files = Path.wildcard("#{file_dir}/*.ex")
+
+    # Add requested file and siblings to the list
+    app_files = (app_files ++ sibling_files ++ [absolute_path])
+                |> Enum.uniq()
+
     Mix.shell().info(
       "Analyzing #{length(app_files)} application files for cross-module effects...\n"
     )
 
-    # Step 3: Analyze all files to build effect cache
-    effect_cache = build_effect_cache(app_files)
-    Mix.shell().info("Built effect cache with #{map_size(effect_cache)} functions\n")
+    # Step 2.7: Set dependency cache in registry BEFORE analysis
+    Litmus.Effects.Registry.set_runtime_cache(deps_cache)
 
-    # Step 4: Merge dependency and application caches
-    full_cache = Map.merge(deps_cache, effect_cache)
+    # Step 3: Use dependency-aware project analyzer
+    case Analyzer.analyze_project(app_files, verbose: false) do
+      {:ok, project_results} ->
+        # Note: Analyzer.analyze_project already builds the dependency graph internally
+        # TODO: Refactor to return graph from Analyzer.analyze_project to avoid rebuilding
+        # (Skipping redundant graph building and missing modules warning for now)
 
-    # Step 5: Set runtime cache for cross-module lookups
-    Litmus.Effects.Registry.set_runtime_cache(full_cache)
+        # Extract effect cache from results
+        effect_cache = extract_project_cache(project_results)
+        Mix.shell().info("Built effect cache with #{map_size(effect_cache)} functions\n")
 
-    # Step 6: Analyze the requested file with full context
-    Mix.shell().info("Analyzing: #{path}\n")
+        # Step 4: Merge dependency and application caches
+        full_cache = Map.merge(deps_cache, effect_cache)
 
-    result =
-      case File.read(path) do
-        {:ok, source} ->
-          case Code.string_to_quoted(source, file: path, line: 1) do
-            {:ok, ast} ->
-              ASTWalker.analyze_ast(ast)
+        # Step 5: Set runtime cache for cross-module lookups
+        Litmus.Effects.Registry.set_runtime_cache(full_cache)
 
-            {:error, {line, error, _}} ->
-              {:error, {:parse_error, line, error}}
-          end
+        # Step 6: Get analysis for the requested file
+        Mix.shell().info("Displaying results for: #{path}\n")
 
-        {:error, reason} ->
-          {:error, {:file_error, reason}}
-      end
+        # Find the module in the results
+        result = find_analysis_for_file(path, project_results)
 
-    case result do
-      {:ok, analysis} ->
-        if opts[:json] do
-          output_json(analysis, opts)
-        else
-          output_text(analysis, opts)
+        case result do
+          {:ok, analysis} ->
+            if opts[:json] do
+              output_json(analysis, opts)
+            else
+              output_text(analysis, opts)
+            end
+
+            # Clear runtime cache after displaying results
+            Litmus.Effects.Registry.clear_runtime_cache()
+
+          {:error, :not_found} ->
+            Mix.shell().error("Could not find analysis for file: #{path}")
+            Litmus.Effects.Registry.clear_runtime_cache()
+            exit({:shutdown, 1})
         end
 
-        # Clear runtime cache after displaying results
-        Litmus.Effects.Registry.clear_runtime_cache()
-
-      {:error, {:parse_error, line, error}} ->
-        Mix.shell().error("Parse error at line #{line}: #{error}")
-        Litmus.Effects.Registry.clear_runtime_cache()
-        exit({:shutdown, 1})
-
       {:error, reason} ->
-        Mix.shell().error("Analysis failed: #{inspect(reason)}")
-        Litmus.Effects.Registry.clear_runtime_cache()
+        Mix.shell().error("Project analysis failed: #{inspect(reason)}")
         exit({:shutdown, 1})
     end
   end
+
+  # Extract cache from project results
+  defp extract_project_cache(project_results) do
+    Enum.reduce(project_results, %{}, fn {_module, analysis}, cache ->
+      Enum.reduce(analysis.functions, cache, fn {{_m, _f, _a} = mfa, func_analysis}, acc ->
+        Map.put(acc, mfa, Core.to_compact_effect(func_analysis.effect))
+      end)
+    end)
+  end
+
+  # Find analysis result for a specific file
+  defp find_analysis_for_file(path, project_results) do
+    # Parse the file to get module name
+    with {:ok, source} <- File.read(path),
+         {:ok, ast} <- Code.string_to_quoted(source, file: path, line: 1),
+         {:ok, module_name} <- extract_module_name_from_ast(ast) do
+      case Map.get(project_results, module_name) do
+        nil -> {:error, :not_found}
+        analysis -> {:ok, analysis}
+      end
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  # Extract module name from AST
+  defp extract_module_name_from_ast({:defmodule, _, [module_ast, _body]}) do
+    {:ok, extract_module_name(module_ast)}
+  end
+
+  defp extract_module_name_from_ast(_), do: {:error, :not_a_module}
+
+  defp extract_module_name({:__aliases__, _, parts}) do
+    Module.concat(parts)
+  end
+
+  defp extract_module_name(atom) when is_atom(atom), do: atom
+  defp extract_module_name(_), do: nil
 
   defp discover_app_files do
     get_elixirc_paths()
@@ -189,6 +237,38 @@ defmodule Mix.Tasks.Effect do
   @deps_cache_path ".effects/deps.cache"
   @deps_checksum_path ".effects/deps.checksum"
 
+  # Convert cache with string keys to MFA tuple keys
+  # "Jason.encode/2" => {Jason, :encode, 2}
+  defp convert_cache_keys_to_mfa(cache_map) do
+    Map.new(cache_map, fn {key, value} ->
+      mfa = string_to_mfa(key)
+      {mfa, value}
+    end)
+  end
+
+  # Parse "Module.function/arity" string to {Module, :function, arity} tuple
+  defp string_to_mfa(str) do
+    case Regex.run(~r/^(.+)\/(\d+)$/, str) do
+      [_, func_with_module, arity] ->
+        arity_int = String.to_integer(arity)
+
+        # Split module and function
+        parts = String.split(func_with_module, ".")
+        {func_name, module_parts} = List.pop_at(parts, -1)
+
+        # Convert module parts to atoms and use Module.concat to create proper alias
+        module_atoms = Enum.map(module_parts, &String.to_atom/1)
+        module = Module.concat(module_atoms)
+        function = String.to_atom(func_name)
+
+        {module, function, arity_int}
+
+      _ ->
+        # Fallback: return as-is if parsing fails
+        raise "Failed to parse MFA string: #{str}"
+    end
+  end
+
   defp load_or_analyze_deps do
     # Calculate current dependency checksum
     current_checksum = calculate_deps_checksum()
@@ -207,7 +287,8 @@ defmodule Mix.Tasks.Effect do
 
       case File.read(@deps_cache_path) do
         {:ok, content} ->
-          Jason.decode!(content)
+          cache_map = Jason.decode!(content)
+          convert_cache_keys_to_mfa(cache_map)
 
         _ ->
           # Cache corrupted, re-analyze
@@ -226,6 +307,13 @@ defmodule Mix.Tasks.Effect do
   end
 
   defp calculate_deps_checksum do
+    # Get Litmus version (critical: if Litmus changes, re-analyze!)
+    litmus_version =
+      case Mix.Project.get() do
+        nil -> "0.0.0"
+        _ -> Mix.Project.config()[:version] || "0.0.0"
+      end
+
     # Get all dependency applications
     deps =
       case Mix.Project.get() do
@@ -243,14 +331,16 @@ defmodule Mix.Tasks.Effect do
           )
       end
 
-    # Create a checksum from dependency names and versions
+    # Create a checksum from Litmus version + dependency names and versions
+    # Format: "litmus:0.1.0,jason:1.4.4,purity:0.1.0,..."
     checksum_data =
-      deps
-      |> Enum.sort()
-      |> Enum.map(fn app ->
-        version = Application.spec(app, :vsn) || '0.0.0'
-        "#{app}:#{version}"
-      end)
+      ["litmus:#{litmus_version}"] ++
+        (deps
+         |> Enum.sort()
+         |> Enum.map(fn app ->
+           version = Application.spec(app, :vsn) || '0.0.0'
+           "#{app}:#{version}"
+         end))
       |> Enum.join(",")
 
     # Use Erlang's built-in hash function (no external deps needed)
@@ -258,56 +348,147 @@ defmodule Mix.Tasks.Effect do
   end
 
   defp analyze_and_cache_deps(checksum) do
-    # For now, return empty cache - full dependency analysis can be added later
-    # This would involve discovering all dependency modules and analyzing them
-    cache = %{}
+    # Discover all dependency source files
+    dep_files = discover_dependency_files()
 
-    # Ensure .effects directory exists
-    File.mkdir_p!(".effects")
+    if Enum.empty?(dep_files) do
+      Mix.shell().info("No dependency source files found to analyze")
+      cache = %{}
 
-    # Save cache and checksum
-    File.write!(@deps_cache_path, Jason.encode!(cache, pretty: true))
-    File.write!(@deps_checksum_path, checksum)
+      # Ensure .effects directory exists
+      File.mkdir_p!(".effects")
 
-    cache
-  end
+      # Save empty cache and checksum
+      File.write!(@deps_cache_path, Jason.encode!(cache, pretty: true))
+      File.write!(@deps_checksum_path, checksum)
 
-  defp build_effect_cache(files) do
-    Litmus.Effects.Registry.set_permissive_mode(true)
-
-    cache =
-      files
-      |> Enum.reduce(%{}, &merge_file_effects(&2, &1))
-
-    Litmus.Effects.Registry.set_permissive_mode(false)
-
-    cache
-  end
-
-  defp merge_file_effects(acc, file) do
-    case analyze_file_safely(file) do
-      {:ok, analysis} -> Map.merge(acc, extract_file_effects(analysis))
-      :error -> acc
-    end
-  end
-
-  defp analyze_file_safely(file) do
-    with {:ok, source} <- File.read(file),
-         {:ok, ast} <- Code.string_to_quoted(source, file: file, line: 1),
-         {:ok, analysis} <- ASTWalker.analyze_ast(ast) do
-      {:ok, analysis}
+      cache
     else
-      _ -> :error
+      Mix.shell().info("Analyzing #{length(dep_files)} dependency source files...")
+
+      # Analyze dependencies using project analyzer
+      case Analyzer.analyze_project(dep_files, verbose: false) do
+        {:ok, results} ->
+          # Extract effects from results
+          cache = extract_project_cache(results)
+
+          Mix.shell().info("Cached #{map_size(cache)} dependency functions")
+
+          # Ensure .effects directory exists
+          File.mkdir_p!(".effects")
+
+          # Convert cache to JSON-serializable format
+          json_cache = serialize_cache_for_json(cache)
+
+          # Save cache and checksum
+          File.write!(@deps_cache_path, Jason.encode!(json_cache, pretty: true))
+          File.write!(@deps_checksum_path, checksum)
+
+          cache
+
+        {:error, reason} ->
+          Mix.shell().error("Warning: Dependency analysis failed: #{inspect(reason)}")
+
+          # Return empty cache on error
+          cache = %{}
+          File.mkdir_p!(".effects")
+          File.write!(@deps_cache_path, Jason.encode!(cache, pretty: true))
+          File.write!(@deps_checksum_path, checksum)
+
+          cache
+      end
     end
   end
 
-  defp extract_file_effects(analysis) do
-    analysis.functions
-    |> Enum.map(fn {{m, f, a}, func_analysis} ->
-      {{m, f, a}, Core.to_compact_effect(func_analysis.effect)}
+  defp discover_dependency_files do
+    deps_path = Mix.Project.deps_path()
+
+    if File.exists?(deps_path) do
+      # Get runtime dependencies only (exclude :dev and :test only deps)
+      runtime_deps = get_runtime_deps()
+
+      # Find all .ex files in dependency lib directories
+      Path.wildcard("#{deps_path}/*/lib/**/*.ex")
+      # Filter to only runtime dependencies
+      |> Enum.filter(fn path ->
+        # Extract dep name: deps/jason/lib/... => "jason"
+        dep_name = extract_dep_name_from_path(path, deps_path)
+        dep_name in runtime_deps
+      end)
+      # Filter out test files and exclude litmus itself
+      |> Enum.reject(fn path ->
+        String.contains?(path, "/test/") or
+          String.contains?(path, "deps/litmus/")
+      end)
+    else
+      []
+    end
+  end
+
+  # Extract dependency name from a file path
+  # E.g. "/path/to/deps/jason/lib/jason.ex" => "jason"
+  defp extract_dep_name_from_path(path, deps_path) do
+    path
+    |> String.replace_prefix(deps_path <> "/", "")
+    |> String.split("/")
+    |> List.first()
+  end
+
+  defp get_runtime_deps do
+    case Mix.Project.get() do
+      nil ->
+        []
+
+      _ ->
+        Mix.Project.config()[:deps]
+        |> Enum.reject(fn
+          {_name, opts} when is_list(opts) ->
+            only = Keyword.get(opts, :only)
+            only in [:dev, :test] or only == [:dev, :test]
+
+          {_name, _version, opts} when is_list(opts) ->
+            only = Keyword.get(opts, :only)
+            only in [:dev, :test] or only == [:dev, :test]
+
+          _ ->
+            false
+        end)
+        |> Enum.map(fn
+          {name, _} -> Atom.to_string(name)
+          {name, _, _} -> Atom.to_string(name)
+        end)
+    end
+  end
+
+  # Convert cache to JSON-serializable format
+  # From: %{{Module, :func, 1} => :p}
+  # To: %{"Module.func/1" => "p"}
+  defp serialize_cache_for_json(cache) do
+    cache
+    |> Enum.map(fn {{module, func, arity}, effect} ->
+      key = "#{inspect(module)}.#{func}/#{arity}"
+      value = effect_to_string(effect)
+      {key, value}
     end)
     |> Map.new()
   end
+
+  # Convert effect type to string for JSON serialization
+  defp effect_to_string(effect) when is_atom(effect), do: Atom.to_string(effect)
+
+  defp effect_to_string({:s, leaves}) when is_list(leaves) do
+    # Side effect with leaves: convert to just "s"
+    # (leaves are internal implementation detail)
+    "s"
+  end
+
+  defp effect_to_string({:e, types}) when is_list(types) do
+    # Exception with specific types - just mark as "e"
+    # (specific types are complex to serialize and not used in cache lookup)
+    "e"
+  end
+
+  defp effect_to_string(effect), do: inspect(effect)
 
   defp output_text(result, opts) do
     module = result.module

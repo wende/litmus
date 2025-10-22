@@ -511,7 +511,7 @@ defmodule Litmus.Types.Effects do
     return_effect
   end
 
-  def extract_closure_return_effect(type) do
+  def extract_closure_return_effect(_type) do
     # Not a closure type, return empty effect
     {:effect_empty}
   end
