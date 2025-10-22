@@ -46,7 +46,7 @@ defmodule Litmus.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :purity]
+      extra_applications: [:logger]
     ]
   end
 
@@ -54,7 +54,7 @@ defmodule Litmus.MixProject do
   defp deps do
     [
       # PURITY static analyzer - Erlang library (local source with fixes)
-      {:purity, path: "purity_source", manager: :rebar3, override: true, compile: "make"},
+      # {:purity, path: "purity_source", manager: :rebar3, override: true, compile: "make"},
       # JSON encoder/decoder
       {:jason, "~> 1.4"},
       # Documentation
