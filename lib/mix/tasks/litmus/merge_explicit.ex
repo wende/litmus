@@ -118,7 +118,8 @@ defmodule Mix.Tasks.Litmus.MergeExplicit do
   #   1. Simple: "Elixir.Module": "*p" - all functions are pure
   #   2. With overrides: "Elixir.Module": {"*": "p", "func/1": "s"} - all pure except func/1
   defp deep_merge(bifs, explicit) do
-    Map.merge(bifs, explicit, fn _module, bifs_functions, explicit_value ->
+    # First merge modules that exist in both
+    merged_common = Map.merge(bifs, explicit, fn _module, bifs_functions, explicit_value ->
       case explicit_value do
         # Simple wildcard: "*p" means all functions have this effect
         "*" <> effect when is_binary(explicit_value) ->
@@ -130,11 +131,11 @@ defmodule Mix.Tasks.Litmus.MergeExplicit do
         explicit_functions when is_map(explicit_functions) ->
           case Map.pop(explicit_functions, "*") do
             {nil, explicit_overrides} ->
-              # No wildcard, just merge function by function
+              # No wildcard, just merge function by function (includes new functions from explicit)
               Map.merge(bifs_functions, explicit_overrides)
 
             {wildcard_effect, explicit_overrides} ->
-              # Apply wildcard to all functions, then apply specific overrides
+              # Apply wildcard to all BIFs functions, then add/override with explicit
               bifs_functions
               |> Map.new(fn {func_arity, _old_effect} ->
                 {func_arity, wildcard_effect}
@@ -147,6 +148,10 @@ defmodule Mix.Tasks.Litmus.MergeExplicit do
           bifs_functions
       end
     end)
+
+    # Also add modules that are ONLY in explicit (not in bifs at all)
+    explicit_only = Map.drop(explicit, Map.keys(bifs))
+    Map.merge(merged_common, explicit_only)
   end
 
   # Count effect types

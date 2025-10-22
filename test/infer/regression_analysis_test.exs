@@ -74,7 +74,7 @@ defmodule RegressionAnalysisTest do
           Support.RegressionTest,
           :bug_2_log_and_save,
           2,
-          {:s, ["File.write/3", "IO.puts/1", "IO.warn/1"]}
+          {:s, ["File.write/3", "IO.puts/1"]}
         )
 
       assert {IO, :puts, 1} in func.calls

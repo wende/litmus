@@ -87,14 +87,14 @@ defmodule EdgeCasesAnalysisTest do
     end
 
     test "log_and_save/2 is effectful" do
-      # File.write!/2 now resolves to bottommost File.write/3 + helpers
+      # File.write!/2 now resolves to bottommost File.write/3
       # Effects are deduplicated and sorted
       func =
         assert_effect_type(
           Support.EdgeCasesTest,
           :log_and_save,
           2,
-          {:s, ["File.write/3", "IO.puts/1", "IO.warn/1"]}
+          {:s, ["File.write/3", "IO.puts/1"]}
         )
 
       assert {IO, :puts, 1} in func.calls
@@ -184,13 +184,13 @@ defmodule EdgeCasesAnalysisTest do
     end
 
     test "if_effectful_else/1 is effectful" do
-      # File.write!/2 now resolves to bottommost File.write/3 + helpers
+      # File.write!/2 now resolves to bottommost File.write/3
       func =
         assert_effect_type(
           Support.EdgeCasesTest,
           :if_effectful_else,
           1,
-          {:s, ["File.write/3", "IO.warn/1"]}
+          {:s, ["File.write/3"]}
         )
 
       assert {File, :write!, 2} in func.calls
@@ -288,7 +288,7 @@ defmodule EdgeCasesAnalysisTest do
           Support.EdgeCasesTest,
           :nested_with_effects_at_all_levels,
           1,
-          {:s, ["File.write/3", "IO.puts/1", "IO.warn/1"]}
+          {:s, ["File.write/3", "IO.puts/1"]}
         )
 
       assert {IO, :puts, 1} in func.calls

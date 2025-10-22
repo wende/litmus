@@ -31,67 +31,99 @@ defmodule Litmus.Effects.Registry do
   @effects_generated_path Path.join(__DIR__, "../../../.effects/generated")
   @effects_deps_path Path.join(__DIR__, "../../../.effects/deps")
 
-  # Load stdlib effects
-  stdlib_effects = @effects_path |> File.read!() |> Jason.decode!()
+  # Note: Defer JSON loading to runtime to avoid compile-time dependency on Jason
+  # These will be loaded lazily when first accessed
 
-  # Load generated effects (application modules)
-  generated_effects =
+  defp load_stdlib_effects do
+    @effects_path |> File.read!() |> Jason.decode!()
+  end
+
+  defp load_generated_effects do
     if File.exists?(@effects_generated_path) do
       @effects_generated_path |> File.read!() |> Jason.decode!()
     else
       %{}
     end
+  end
 
-  # Load dependency effects
-  deps_effects =
+  defp load_deps_effects do
     if File.exists?(@effects_deps_path) do
       @effects_deps_path |> File.read!() |> Jason.decode!()
     else
       %{}
     end
+  end
 
-  # Merge all effect sources (later sources override earlier ones)
-  effects_data = Map.merge(Map.merge(stdlib_effects, generated_effects), deps_effects)
+  defp load_all_effects do
+    stdlib_effects = load_stdlib_effects()
+    generated_effects = load_generated_effects()
+    deps_effects = load_deps_effects()
 
-  # Build a map of {module, function, arity} => effect_type
-  @effects_map effects_data
-               |> Enum.reject(fn {key, _} -> String.starts_with?(key, "_") end)
-               |> Enum.flat_map(fn {module_name, functions} ->
-                 # Convert module name string to atom
-                 module =
-                   case module_name do
-                     "Elixir." <> rest -> Module.concat([rest])
-                     name -> String.to_atom(name)
-                   end
+    # Deep merge at the function level with priority: stdlib > generated > deps
+    # Stdlib has manually-reviewed effects and should override everything else
+    deps_effects
+    |> deep_merge_effects(generated_effects)
+    |> deep_merge_effects(stdlib_effects)
+  end
 
-                 # Convert each function entry
-                 Enum.map(functions, fn {func_arity, effect} ->
-                   # Parse "function/arity" - find the LAST "/" to handle operators like "..", "//", etc.
-                   case String.reverse(func_arity) |> String.split("/", parts: 2) do
-                     [reversed_arity, reversed_name] ->
-                       func_name = String.reverse(reversed_name)
-                       arity_str = String.reverse(reversed_arity)
-                       func_atom = String.to_atom(func_name)
-                       arity = String.to_integer(arity_str)
+  # Deep merge effects maps at the function level
+  defp deep_merge_effects(map1, map2) do
+    Map.merge(map1, map2, fn _module, functions1, functions2 ->
+      Map.merge(functions1, functions2)
+    end)
+  end
 
-                       {{module, func_atom, arity}, effect}
+  # Use external_resource so recompilation happens when files change
+  @external_resource @effects_path
 
-                     _ ->
-                       raise "Invalid function/arity format: #{func_arity}"
-                   end
-                 end)
-               end)
-               |> Map.new()
+  # Build effects map lazily at runtime (avoids compile-time Jason dependency)
+  @doc """
+  Returns the raw effects map loaded from .effects.json.
 
-  # Extract unique modules
-  @effect_modules effects_data
-                  |> Map.keys()
-                  |> Enum.reject(&String.starts_with?(&1, "_"))
-                  |> Enum.map(fn
+  This is useful for debugging or advanced use cases. Loaded lazily on first access.
+  """
+  def effects_map do
+    case :persistent_term.get({__MODULE__, :effects_map}, nil) do
+      nil ->
+        effects_data = load_all_effects()
+
+        map = effects_data
+              |> Enum.reject(fn {key, _} -> String.starts_with?(key, "_") end)
+              |> Enum.flat_map(fn {module_name, functions} ->
+                # Convert module name string to atom
+                module =
+                  case module_name do
                     "Elixir." <> rest -> Module.concat([rest])
                     name -> String.to_atom(name)
-                  end)
-                  |> Enum.uniq()
+                  end
+
+                # Convert each function entry
+                Enum.map(functions, fn {func_arity, effect} ->
+                  # Parse "function/arity" - find the LAST "/" to handle operators like "..", "//", etc.
+                  case String.reverse(func_arity) |> String.split("/", parts: 2) do
+                    [reversed_arity, reversed_name] ->
+                      func_name = String.reverse(reversed_name)
+                      arity_str = String.reverse(reversed_arity)
+                      func_atom = String.to_atom(func_name)
+                      arity = String.to_integer(arity_str)
+
+                      {{module, func_atom, arity}, effect}
+
+                    _ ->
+                      raise "Invalid function/arity format: #{func_arity}"
+                  end
+                end)
+              end)
+              |> Map.new()
+
+        :persistent_term.put({__MODULE__, :effects_map}, map)
+        map
+      cached -> cached
+    end
+  end
+
+  # Note: @effects_map and @effect_modules module attributes removed
+  # They are now loaded lazily via effects_map() function to avoid compile-time Jason dependency
 
   # Standard library modules that MUST be fully covered in the registry
   # Any function from these modules MUST have an explicit effect definition
@@ -296,7 +328,7 @@ defmodule Litmus.Effects.Registry do
   module but is not defined in the registry.
   """
   def effect?(mfa) do
-    has_effect = Map.has_key?(@effects_map, mfa)
+    has_effect = Map.has_key?(effects_map(), mfa)
 
     # If not found, try resolving through resolution map
     if not has_effect do
@@ -369,7 +401,7 @@ defmodule Litmus.Effects.Registry do
       if exception_struct_function?(mfa) do
         :p
       else
-        case Map.get(@effects_map, mfa) do
+        case Map.get(effects_map(), mfa) do
           nil ->
             # Not in effects map - check runtime cache or return nil
             # Resolution is now handled by caller (from_mfa) to enable multi-effect tracking
@@ -538,7 +570,10 @@ defmodule Litmus.Effects.Registry do
     Process.delete(:litmus_runtime_effects_cache)
   end
 
-  defp runtime_cache() do
+  @doc """
+  Gets the current runtime effect cache.
+  """
+  def runtime_cache() do
     Process.get(:litmus_runtime_effects_cache, %{})
   end
 
@@ -583,30 +618,24 @@ defmodule Litmus.Effects.Registry do
   Returns a list of all registered effect modules.
   """
   def effect_modules do
-    @effect_modules
+    effects_map()
+    |> Map.keys()
+    |> Enum.map(fn {module, _fun, _arity} -> module end)
+    |> Enum.uniq()
   end
 
   @doc """
   Checks if a module is known to contain effects.
   """
   def effect_module?(module) do
-    module in @effect_modules
+    module in effect_modules()
   end
 
   @doc """
   Returns all MFAs in the effect registry.
   """
   def all_effects do
-    Map.keys(@effects_map)
-  end
-
-  @doc """
-  Returns the raw effects map loaded from .effects.json.
-
-  This is useful for debugging or advanced use cases.
-  """
-  def effects_map do
-    @effects_map
+    Map.keys(effects_map())
   end
 
   # Load resolution mapping at compile time
@@ -733,7 +762,7 @@ defmodule Litmus.Effects.Registry do
             []
 
           # If it's in the effects map, it's a leaf (bottommost)
-          Map.has_key?(@effects_map, intermediate_mfa) ->
+          Map.has_key?(effects_map(), intermediate_mfa) ->
             [intermediate_mfa]
 
           # If it has further resolutions, recurse
