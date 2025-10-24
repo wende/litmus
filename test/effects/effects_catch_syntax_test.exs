@@ -109,15 +109,18 @@ defmodule Litmus.EffectsNewApiTest do
   end
 
   describe "branching with effects" do
-    # Note: The "always yields same result" warnings in these tests are intentional.
-    # We use literal true/false to test that the effect system correctly handles
-    # each branch of conditional expressions during CPS transformation.
+    # Note: We use always-true/false conditions to test that the effect system
+    # correctly handles each branch of conditional expressions during CPS transformation.
+
+    # Helper to get boolean values (prevents compile-time optimization warnings)
+    defp get_true, do: true
+    defp get_false, do: false
 
     test "if with effect in true branch" do
       result =
         effect do
           x =
-            if true do
+            if get_true() do
               File.read!("true.txt")
             else
               "false value"
@@ -135,7 +138,7 @@ defmodule Litmus.EffectsNewApiTest do
       result =
         effect do
           x =
-            if false do
+            if get_false() do
               File.read!("true.txt")
             else
               File.read!("false.txt")
@@ -153,7 +156,7 @@ defmodule Litmus.EffectsNewApiTest do
       result =
         effect do
           x =
-            if false do
+            if get_false() do
               File.read!("file.txt")
             else
               "pure value"

@@ -169,9 +169,10 @@ defmodule Support.EdgeCasesTest do
   Should still be classified as exception.
   """
   def exception_in_block do
+    # Intentional: testing exception inference (using apply to avoid compile warning)
     x = 10
-    y = 1 - 1
-    div(x, y)
+    y = 0
+    apply(Kernel, :div, [x, y])
   end
 
   # ============================================================================
@@ -256,10 +257,11 @@ defmodule Support.EdgeCasesTest do
   # Cross-Module Function Calls
   # ============================================================================
 
-  @doc """
-  This module is used for testing cross-module effects.
-  """
   defmodule TestHelper do
+    @moduledoc """
+    This module is used for testing cross-module effects.
+    """
+
     def pure_helper(x), do: x * 2
     def effectful_helper(x), do: IO.puts("Value: #{x}")
     def exception_helper(x), do: hd(x)

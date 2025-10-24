@@ -189,17 +189,15 @@ defmodule Support.RegressionTest do
   # Bug #7: Test Support Modules Not Included in Cache
   # ============================================================================
 
-  @doc """
-  BUG: Modules in test/support were not being analyzed in dev environment.
-
-  ROOT CAUSE: `discover_app_files/0` in effect.ex only included test/support when
-  `Mix.env() == :test`, but we often run analysis in dev environment.
-
-  FIX: Changed condition from `if Mix.env() == :test` to `if File.dir?("test/support")`
-  to always include test/support if it exists.
-
-  EXPECTED: Cross-module calls to test support modules should work correctly.
-  """
+  # BUG: Modules in test/support were not being analyzed in dev environment.
+  #
+  # ROOT CAUSE: `discover_app_files/0` in effect.ex only included test/support when
+  # `Mix.env() == :test`, but we often run analysis in dev environment.
+  #
+  # FIX: Changed condition from `if Mix.env() == :test` to `if File.dir?("test/support")`
+  # to always include test/support if it exists.
+  #
+  # EXPECTED: Cross-module calls to test support modules should work correctly.
 
   # This bug is more about infrastructure, but we can still document it
   # The fix ensures that modules like SampleModule are always in the cache
@@ -208,16 +206,15 @@ defmodule Support.RegressionTest do
   # Bug #8: Enum.reduce Marked as Unknown Instead of Lambda-Dependent
   # ============================================================================
 
-  @doc """
-  BUG: `Enum.reduce/3` was marked as unknown (u) instead of lambda-dependent (l).
+  # BUG: `Enum.reduce/3` was marked as unknown (u) instead of lambda-dependent (l).
+  #
+  # ROOT CAUSE: `Enum.reduce/3` was categorized as "u" in the registry, but it should be "l"
+  # because its effects depend entirely on the lambda passed to it.
+  #
+  # FIX: Changed `Enum.reduce/3` from "u" to "l" in `.effects.json`.
+  #
+  # EXPECTED: Calling Enum.reduce with a pure lambda should be pure (p).
 
-  ROOT CAUSE: `Enum.reduce/3` was categorized as "u" in the registry, but it should be "l"
-  because its effects depend entirely on the lambda passed to it.
-
-  FIX: Changed `Enum.reduce/3` from "u" to "l" in `.effects.json`.
-
-  EXPECTED: Calling Enum.reduce with a pure lambda should be pure (p).
-  """
   def bug_8_reduce_with_pure_lambda(list) do
     Enum.reduce(list, 0, fn x, acc -> x + acc end)
   end
