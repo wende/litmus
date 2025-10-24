@@ -927,6 +927,14 @@ defmodule Litmus.Inference.Bidirectional do
     {:error, :empty_case}
   end
 
+  # Handle dynamic clause generation (unquote, macros, etc.)
+  # These cannot be analyzed statically, so we return unknown
+  defp synthesize_case_clauses(clauses, _context, _scrutinee_effect, _subst) when not is_list(clauses) do
+    # clauses is an AST node like {:unquote, _, _} rather than a list of clauses
+    # This happens with macro-generated clauses that can't be analyzed statically
+    {:ok, :any, :u, %{}}
+  end
+
   defp synthesize_case_clauses(clauses, context, scrutinee_effect, subst) do
     # Synthesize each clause body
     clause_results =
