@@ -2,11 +2,10 @@ defmodule Spike3.BenchmarkCorpus do
   @moduledoc """
   Comprehensive benchmark corpus for protocol effect tracing.
 
-  50 test cases covering:
+  40 test cases covering:
   - Enum operations (20 cases)
   - String.Chars protocol (10 cases)
   - Inspect protocol (5 cases)
-  - String operations (10 cases)
   - Edge cases (5 cases)
 
   Each case includes:
@@ -598,182 +597,15 @@ defmodule Spike3.BenchmarkCorpus do
   end
 
   #################################################################
-  # String Operations (10 cases)
-  #################################################################
-
-  @doc "Case 36: String.upcase"
-  def case_36 do
-    String.upcase("hello")
-  end
-
-  def meta_36 do
-    %{
-      category: :string,
-      function: :upcase,
-      struct_type: :binary,
-      lambda_effect: :p,
-      expected_effect: :p,
-      description: "String.upcase = pure"
-    }
-  end
-
-  @doc "Case 37: String.downcase"
-  def case_37 do
-    String.downcase("HELLO")
-  end
-
-  def meta_37 do
-    %{
-      category: :string,
-      function: :downcase,
-      struct_type: :binary,
-      lambda_effect: :p,
-      expected_effect: :p,
-      description: "String.downcase = pure"
-    }
-  end
-
-  @doc "Case 38: String.trim"
-  def case_38 do
-    String.trim("  hello  ")
-  end
-
-  def meta_38 do
-    %{
-      category: :string,
-      function: :trim,
-      struct_type: :binary,
-      lambda_effect: :p,
-      expected_effect: :p,
-      description: "String.trim = pure"
-    }
-  end
-
-  @doc "Case 39: String.split"
-  def case_39 do
-    String.split("a,b,c", ",")
-  end
-
-  def meta_39 do
-    %{
-      category: :string,
-      function: :split,
-      struct_type: :binary,
-      lambda_effect: :p,
-      expected_effect: :p,
-      description: "String.split = pure"
-    }
-  end
-
-  @doc "Case 40: String.replace"
-  def case_40 do
-    String.replace("hello world", "world", "elixir")
-  end
-
-  def meta_40 do
-    %{
-      category: :string,
-      function: :replace,
-      struct_type: :binary,
-      lambda_effect: :p,
-      expected_effect: :p,
-      description: "String.replace = pure"
-    }
-  end
-
-  @doc "Case 41: String pipeline"
-  def case_41 do
-    "  HELLO  "
-    |> String.trim()
-    |> String.downcase()
-    |> String.upcase()
-  end
-
-  def meta_41 do
-    %{
-      category: :string,
-      function: :pipeline,
-      struct_type: :binary,
-      lambda_effect: :p,
-      expected_effect: :p,
-      description: "String pipeline = pure"
-    }
-  end
-
-  @doc "Case 42: String.length"
-  def case_42 do
-    String.length("hello")
-  end
-
-  def meta_42 do
-    %{
-      category: :string,
-      function: :length,
-      struct_type: :binary,
-      lambda_effect: :p,
-      expected_effect: :p,
-      description: "String.length = pure"
-    }
-  end
-
-  @doc "Case 43: String.slice"
-  def case_43 do
-    String.slice("hello", 1, 3)
-  end
-
-  def meta_43 do
-    %{
-      category: :string,
-      function: :slice,
-      struct_type: :binary,
-      lambda_effect: :p,
-      expected_effect: :p,
-      description: "String.slice = pure"
-    }
-  end
-
-  @doc "Case 44: String.reverse"
-  def case_44 do
-    String.reverse("hello")
-  end
-
-  def meta_44 do
-    %{
-      category: :string,
-      function: :reverse,
-      struct_type: :binary,
-      lambda_effect: :p,
-      expected_effect: :p,
-      description: "String.reverse = pure"
-    }
-  end
-
-  @doc "Case 45: String.contains?"
-  def case_45 do
-    String.contains?("hello world", "world")
-  end
-
-  def meta_45 do
-    %{
-      category: :string,
-      function: :contains?,
-      struct_type: :binary,
-      lambda_effect: :p,
-      expected_effect: :p,
-      description: "String.contains? = pure"
-    }
-  end
-
-  #################################################################
   # Edge Cases (5 cases)
   #################################################################
 
-  @doc "Case 46: Empty list enumeration"
-  def case_46 do
+  @doc "Case 36: Empty list enumeration"
+  def case_36 do
     [] |> Enum.map(&(&1 * 2))
   end
 
-  def meta_46 do
+  def meta_36 do
     %{
       category: :edge_case,
       function: :map,
@@ -784,12 +616,12 @@ defmodule Spike3.BenchmarkCorpus do
     }
   end
 
-  @doc "Case 47: Nested Enum operations"
-  def case_47 do
+  @doc "Case 37: Nested Enum operations"
+  def case_37 do
     [[1, 2], [3, 4]] |> Enum.map(fn list -> Enum.map(list, &(&1 * 2)) end)
   end
 
-  def meta_47 do
+  def meta_37 do
     %{
       category: :edge_case,
       function: :map,
@@ -800,12 +632,12 @@ defmodule Spike3.BenchmarkCorpus do
     }
   end
 
-  @doc "Case 48: Enum.into (Collectable protocol)"
-  def case_48 do
+  @doc "Case 38: Enum.into (Collectable protocol)"
+  def case_38 do
     [{:a, 1}, {:b, 2}] |> Enum.into(%{})
   end
 
-  def meta_48 do
+  def meta_38 do
     %{
       category: :edge_case,
       function: :into,
@@ -816,14 +648,14 @@ defmodule Spike3.BenchmarkCorpus do
     }
   end
 
-  @doc "Case 49: Mixed user and built-in types"
-  def case_49 do
+  @doc "Case 39: Mixed user and built-in types"
+  def case_39 do
     list1 = Spike3.MyList.new([1, 2, 3])
     list2 = [4, 5, 6]
     {Enum.map(list1, &(&1 * 2)), Enum.map(list2, &(&1 * 2))}
   end
 
-  def meta_49 do
+  def meta_39 do
     %{
       category: :edge_case,
       function: :map,
@@ -834,12 +666,12 @@ defmodule Spike3.BenchmarkCorpus do
     }
   end
 
-  @doc "Case 50: Comprehension (desugars to Enum)"
-  def case_50 do
+  @doc "Case 40: Comprehension (desugars to Enum)"
+  def case_40 do
     for x <- [1, 2, 3], y <- [4, 5], x + y > 5, do: x * y
   end
 
-  def meta_50 do
+  def meta_40 do
     %{
       category: :edge_case,
       function: :comprehension,
@@ -858,7 +690,7 @@ defmodule Spike3.BenchmarkCorpus do
   Returns all benchmark cases as a list of {function_name, metadata}.
   """
   def all_cases do
-    for i <- 1..50 do
+    for i <- 1..40 do
       case_fun = String.to_atom("case_#{String.pad_leading(to_string(i), 2, "0")}")
       meta_fun = String.to_atom("meta_#{String.pad_leading(to_string(i), 2, "0")}")
       {case_fun, apply(__MODULE__, meta_fun, [])}

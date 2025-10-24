@@ -1,6 +1,9 @@
 defmodule Litmus.Spikes.BeamModificationSpikeTest do
   use ExUnit.Case, async: false
 
+  @moduletag :spike
+  @moduletag :spike1
+
   alias Litmus.Spikes.BeamModifierSpike
   alias Litmus.Support.BeamTestModule, as: TestModule
 

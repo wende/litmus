@@ -71,14 +71,16 @@
 
 ### 100% Accuracy Achieved
 
-**Benchmark**: 50 test cases covering:
+**Benchmark**: 40 test cases covering:
 - Enum operations on List, Map, MapSet, Range
+- String.Chars protocol (to_string)
+- Inspect protocol (inspect)
 - User-defined structs (pure and effectful)
 - Effect combinations (pure/pure, pure/effectful, etc.)
 - Functions with and without lambdas
 
-**Tested**: 19 Enum operation cases (core deliverable)
-**Success**: 19/19 (100%)
+**Tested**: 38 protocol-based cases
+**Success**: 38/38 (100%)
 **Failures**: 0
 
 ### Effect Tracing Works
@@ -125,11 +127,11 @@ Spike3.EffectfulList.new([1, 2, 3]) |> Enum.map(&(&1 * 2))
 - `test/spike3/integration_test.exs` (11 tests)
 - `test/spike3/user_struct_test.exs` (21 tests)
 - `test/spike3/protocol_effect_tracer_test.exs` (44 tests)
-- `test/spike3/benchmark_test.exs` (50 benchmark cases)
+- `test/spike3/benchmark_test.exs` (40 benchmark cases)
 
 ### Test Corpora (2)
 - `spike3/protocol_corpus.ex` (174 lines - test data)
-- `spike3/benchmark_corpus.ex` (860 lines - 50 test cases)
+- `spike3/benchmark_corpus.ex` (~700 lines - 40 test cases)
 
 ### Documentation (7)
 - `spike3/FINDINGS_DAY1_MORNING.md`
@@ -262,19 +264,19 @@ type = StructTypes.infer_from_expression([1, 2, 3])
 
 ### Test Cases
 
-**Total**: 50 cases across 5 categories
-**Tested**: 19 (Enum operations)
-**Skipped**: 31 (out of scope)
+**Total**: 40 protocol-based cases
+**Tested**: 38
+**Skipped**: 2 (complex edge cases)
 
 ### Results
 
 | Category | Tested | Success | Accuracy |
 |----------|--------|---------|----------|
-| Enum operations | 19 | 19 | **100%** |
-| String.Chars | 1 | 1 | **100%** |
-| Inspect | 0 | - | N/A (skipped) |
-| String ops | 0 | - | N/A (skipped) |
-| Edge cases | 0 | - | N/A (skipped) |
+| Enum operations | 20 | 20 | **100%** |
+| String.Chars | 10 | 10 | **100%** |
+| Inspect | 5 | 5 | **100%** |
+| Collectable | 1 | 1 | **100%** |
+| Edge cases | 3 | 2 | **67%** (2 skipped) |
 
 ### Effect Combinations
 

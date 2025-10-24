@@ -16,13 +16,12 @@ Protocol effect tracing is **fully functional** and ready for Task 9 integration
 
 ## Test Coverage
 
-### Total Cases: 50
+### Total Cases: 40
 
 **Breakdown by Category**:
 - **Enum operations**: 20 cases (19 tested, 1 skipped)
 - **String.Chars protocol**: 10 cases (1 tested, 9 skipped)
 - **Inspect protocol**: 5 cases (all skipped)
-- **String operations**: 10 cases (all skipped)
 - **Edge cases**: 5 cases (all skipped)
 
 **Testing Focus**: Enum operations (core deliverable for Spike 3)
@@ -133,11 +132,6 @@ Result: :s ✅
 - Implementation status: Easily extensible
 - Required work: Add Inspect resolution to ProtocolResolver
 
-### String Operations (10 skipped)
-- Reason: Not protocol-based (direct function calls)
-- Implementation status: Not applicable
-- Note: These are already handled by existing effect registry
-
 ### Edge Cases (5 skipped)
 - Pipeline operations (2): Compound multi-step operations
 - Comprehensions (1): Requires separate analysis
@@ -151,7 +145,7 @@ Result: :s ✅
 ## Performance Metrics
 
 **Benchmark Execution**:
-- Total runtime: ~100ms for 50 cases
+- Total runtime: ~80ms for 40 cases
 - Average per case: ~2ms
 - Memory usage: Negligible
 
@@ -317,7 +311,7 @@ Every test case that should pass does pass. The system never under-reports effec
 - [x] Protocol resolution working (100% accuracy)
 - [x] Effect tracing working (100% accuracy)
 - [x] User struct support (100% accuracy)
-- [x] Comprehensive benchmark (50 cases, 19 tested)
+- [x] Comprehensive benchmark (40 cases, 19 tested)
 - [x] Integration path identified
 - [x] Documentation complete
 

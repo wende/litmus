@@ -1,6 +1,9 @@
 defmodule Litmus.Spikes.ErlangAnalyzerSpikeTest do
   use ExUnit.Case, async: false
 
+  @moduletag :spike
+  @moduletag :spike2
+
   alias Litmus.Spikes.ErlangAnalyzerSpike
 
   @moduledoc """

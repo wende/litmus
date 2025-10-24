@@ -167,10 +167,15 @@ defmodule Litmus.Spike3.ProtocolResolver do
       iex> type = {:list, :integer}
       iex> ProtocolResolver.resolve_call(Enum, :map, [type, :any])
       {:ok, {Enumerable.List, :reduce, 3}}
+
+      iex> alias Litmus.Spike3.ProtocolResolver
+      iex> ProtocolResolver.resolve_call(Kernel, :to_string, [:integer])
+      {:ok, {String.Chars.Integer, :to_string, 1}}
   """
   def resolve_call(module, function, arg_types) do
     # Map common Enum functions to their protocol calls
     case {module, function} do
+      # Enum protocol (Enumerable)
       {Enum, :map} ->
         [collection_type | _rest] = arg_types
         resolve_enum_function(collection_type, :reduce)
@@ -207,6 +212,20 @@ defmodule Litmus.Spike3.ProtocolResolver do
         [collection_type | _rest] = arg_types
         resolve_enum_function(collection_type, :reduce)
 
+      {Enum, :into} ->
+        [_source_type, target_type | _rest] = arg_types
+        resolve_collectable_function(target_type)
+
+      # String.Chars protocol (to_string)
+      {Kernel, :to_string} ->
+        [value_type] = arg_types
+        resolve_string_chars_function(value_type)
+
+      # Inspect protocol (inspect)
+      {Kernel, :inspect} ->
+        [value_type | _opts] = arg_types
+        resolve_inspect_function(value_type)
+
       _ ->
         :unknown
     end
@@ -217,6 +236,38 @@ defmodule Litmus.Spike3.ProtocolResolver do
       {:ok, impl_module} ->
         arity = function_arity(protocol_function)
         {:ok, {impl_module, protocol_function, arity}}
+
+      :unknown ->
+        :unknown
+    end
+  end
+
+  defp resolve_string_chars_function(value_type) do
+    case resolve_impl(String.Chars, value_type) do
+      {:ok, impl_module} ->
+        {:ok, {impl_module, :to_string, 1}}
+
+      :unknown ->
+        :unknown
+    end
+  end
+
+  defp resolve_inspect_function(value_type) do
+    case resolve_impl(Inspect, value_type) do
+      {:ok, impl_module} ->
+        # Inspect protocol uses inspect/2 (value, opts)
+        {:ok, {impl_module, :inspect, 2}}
+
+      :unknown ->
+        :unknown
+    end
+  end
+
+  defp resolve_collectable_function(target_type) do
+    case resolve_impl(Collectable, target_type) do
+      {:ok, impl_module} ->
+        # Collectable protocol uses into/1
+        {:ok, {impl_module, :into, 1}}
 
       :unknown ->
         :unknown

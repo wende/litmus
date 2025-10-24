@@ -442,6 +442,28 @@
     "rem/2": "e",
     "demonitor/1": "s"
   },
+  "maps": {
+    "put/3": "p",
+    "get/2": "p",
+    "remove/2": "p",
+    "keys/1": "p",
+    "values/1": "p",
+    "to_list/1": "p",
+    "from_list/1": "p",
+    "size/1": "p",
+    "is_key/2": "p",
+    "merge/2": "p",
+    "new/0": "p",
+    "find/2": "p",
+    "take/2": "p",
+    "update/3": "p",
+    "without/2": "p",
+    "with/2": "p",
+    "get/3": "p",
+    "filter/2": "l",
+    "map/2": "l",
+    "fold/3": "l"
+  },
   "Elixir.GenServer": {
     "call/2": "s",
     "call/3": "s",

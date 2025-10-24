@@ -1,5 +1,9 @@
 defmodule Litmus.Spike3.ProtocolResolverTest do
   use ExUnit.Case, async: true
+
+  @moduletag :spike
+  @moduletag :spike3
+
   alias Litmus.Spike3.{ProtocolResolver, StructTypes}
 
   doctest ProtocolResolver

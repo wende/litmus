@@ -60,10 +60,26 @@ defmodule Litmus.Spike3.ProtocolEffectTracer do
     # Step 1: Resolve protocol implementation
     # Build arg types - some functions don't have lambda args
     arg_types =
-      if function in [:count, :member?, :take, :drop] do
-        [collection_type]
-      else
-        [collection_type, :any]
+      cond do
+        # Functions without lambda arguments
+        function in [:count, :member?, :take, :drop] ->
+          [collection_type]
+
+        # to_string only takes the value
+        function == :to_string ->
+          [collection_type]
+
+        # inspect takes value + opts
+        function == :inspect ->
+          [collection_type, :any]
+
+        # into takes source and target (target is what matters for Collectable)
+        function == :into ->
+          [:any, collection_type]
+
+        # Default: collection + lambda
+        true ->
+          [collection_type, :any]
       end
 
     case ProtocolResolver.resolve_call(module, function, arg_types) do
@@ -337,6 +353,28 @@ defmodule Litmus.Spike3.ProtocolEffectTracer do
       {Enumerable.Spike3.EffectfulList, :count, 1} -> :s
       {Enumerable.Spike3.EffectfulList, :member?, 2} -> :s
       {Enumerable.Spike3.EffectfulList, :slice, 1} -> :p
+
+      # String.Chars protocol implementations (all pure)
+      {String.Chars.Integer, :to_string, 1} -> :p
+      {String.Chars.Atom, :to_string, 1} -> :p
+      {String.Chars.Float, :to_string, 1} -> :p
+      {String.Chars.List, :to_string, 1} -> :p
+      {String.Chars.BitString, :to_string, 1} -> :p
+
+      # Inspect protocol implementations (all pure)
+      {Inspect.Integer, :inspect, 2} -> :p
+      {Inspect.Atom, :inspect, 2} -> :p
+      {Inspect.Float, :inspect, 2} -> :p
+      {Inspect.List, :inspect, 2} -> :p
+      {Inspect.BitString, :inspect, 2} -> :p
+      {Inspect.Map, :inspect, 2} -> :p
+      {Inspect.Tuple, :inspect, 2} -> :p
+
+      # Collectable protocol implementations (all pure)
+      {Collectable.List, :into, 1} -> :p
+      {Collectable.Map, :into, 1} -> :p
+      {Collectable.MapSet, :into, 1} -> :p
+      {Collectable.BitString, :into, 1} -> :p
 
       # Unknown implementation
       _ ->

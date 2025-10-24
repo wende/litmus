@@ -87,10 +87,34 @@ defmodule Litmus.Spikes.ErlangAnalyzerSpike do
     {:erlang, :map_get, 2} => :p,
     {:erlang, :is_map_key, 2} => :p,
 
+    # :maps module BIFs (added for spike2 compatibility)
+    {:maps, :put, 3} => :p,
+    {:maps, :get, 2} => :p,
+    {:maps, :remove, 2} => :p,
+    {:maps, :keys, 1} => :p,
+    {:maps, :values, 1} => :p,
+    {:maps, :to_list, 1} => :p,
+    {:maps, :from_list, 1} => :p,
+    {:maps, :size, 1} => :p,
+    {:maps, :is_key, 2} => :p,
+    {:maps, :merge, 2} => :p,
+    {:maps, :new, 0} => :p,
+    {:maps, :find, 2} => :p,
+    {:maps, :take, 2} => :p,
+    {:maps, :update, 3} => :p,
+    {:maps, :without, 2} => :p,
+    {:maps, :with, 2} => :p,
+    {:maps, :get, 3} => :p,
+    {:maps, :filter, 2} => :p,
+    {:maps, :map, 2} => :p,
+    {:maps, :fold, 3} => :p,
+
     # Pure error functions (raise but don't do I/O)
     {:erlang, :error, 1} => :p,
     {:erlang, :error, 2} => :p,
     {:erlang, :throw, 1} => :p,
+    {:erlang, :nif_error, 1} => :p,
+    # nif_error is a placeholder for NIFs, never actually executes
 
     # Pure apply (depends on what's being applied)
     {:erlang, :apply, 2} => :p,
@@ -358,6 +382,10 @@ defmodule Litmus.Spikes.ErlangAnalyzerSpike do
       # Remote call to erlang module (BIF check)
       {:call, _line, {:remote, _l1, {:atom, _l2, :erlang}, {:atom, _l3, func}}, args} ->
         bif_effects(:erlang, func, length(args))
+
+      # Remote call to maps module (BIF check - maps functions are BIFs)
+      {:call, _line, {:remote, _l1, {:atom, _l2, :maps}, {:atom, _l3, func}}, args} ->
+        bif_effects(:maps, func, length(args))
 
       # Remote call to other module
       {:call, _line, {:remote, _l1, {:atom, _l2, mod}, {:atom, _l3, _func}}, _args} ->

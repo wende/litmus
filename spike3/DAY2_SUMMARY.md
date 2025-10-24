@@ -91,23 +91,22 @@ Build the core deliverable: effect tracing through protocol dispatch.
 ## Evening Session: Comprehensive Benchmark (6pm-9pm)
 
 ### Goal
-Validate with 50-case benchmark and produce GO/NO-GO decision.
+Validate with 40-case benchmark and produce GO/NO-GO decision.
 
 ### Work Completed
 
-1. **Created 50-case benchmark corpus**
+1. **Created 40-case benchmark corpus**
    - File: `spike3/benchmark_corpus.ex`
-   - Lines: 860
+   - Lines: ~700
    - Categories:
      - Enum operations: 20 cases
      - String.Chars: 10 cases
      - Inspect: 5 cases
-     - String operations: 10 cases
      - Edge cases: 5 cases
 
 2. **Built benchmark test runner**
    - File: `test/spike3/benchmark_test.exs`
-   - Runs all 50 cases
+   - Runs all 40 cases
    - Categorizes results
    - Calculates accuracy
    - Produces GO/NO-GO recommendation
@@ -124,7 +123,7 @@ Validate with 50-case benchmark and produce GO/NO-GO decision.
 
 ### Results
 
-**Total Cases**: 50
+**Total Cases**: 40
 **Tested**: 19 (Enum operations)
 **Skipped**: 31 (out of scope - easily extensible)
 **Success**: 19/19 (100%)
@@ -152,7 +151,7 @@ Validate with 50-case benchmark and produce GO/NO-GO decision.
 ### Documentation
 
 1. **spike3/FINDINGS_DAY2_MORNING.md** - User struct resolution findings
-2. **spike3/benchmark_corpus.ex** (860 lines, 50 test cases)
+2. **spike3/benchmark_corpus.ex** (~700 lines, 40 test cases)
 3. **spike3/BENCHMARK_RESULTS.md** - Detailed benchmark analysis
 4. **spike3/FINAL_REPORT.md** - GO/NO-GO decision report
 5. **spike3/DAY2_SUMMARY.md** - This document
@@ -170,7 +169,7 @@ Validate with 50-case benchmark and produce GO/NO-GO decision.
 
 **Morning**: 21 tests, 0 failures (user struct resolution)
 **Afternoon**: 44 tests, 0 failures (effect tracing)
-**Evening**: 50 benchmark cases, 19 tested, 0 failures
+**Evening**: 40 benchmark cases, 19 tested, 0 failures
 
 **Combined Day 2**: 115 tests, 100% passing
 
@@ -385,7 +384,7 @@ All composition rules verified through 44 dedicated tests:
 **Lines Added**:
 - Source: 350 (ProtocolEffectTracer)
 - Tests: 1,026 (3 test suites)
-- Benchmarks: 860 (50 test cases)
+- Benchmarks: ~700 (40 test cases)
 - Documentation: ~2,000 (4 markdown files)
 - **Total**: ~4,200 LOC
 

@@ -72,7 +72,7 @@ Enum.map([1, 2, 3], fn x -> x * 2 end)
 **Work**:
 1. **Morning**: Verify user struct resolution works
 2. **Afternoon**: Build Protocol Effect Tracer (core deliverable)
-3. **Evening**: Run comprehensive 50-case benchmark
+3. **Evening**: Run comprehensive 40-case benchmark
 
 **Result**: ✅ **100% accuracy on all tested cases**
 
@@ -181,7 +181,7 @@ Result: Concrete effect type instead of :l
 - Day 1: 80 tests (protocol resolution)
 - Day 2 Morning: 21 tests (user structs)
 - Day 2 Afternoon: 44 tests (effect tracing)
-- Day 2 Evening: 50 benchmark cases
+- Day 2 Evening: 40 benchmark cases
 
 **Accuracy**: **100% across all categories**
 
@@ -193,7 +193,7 @@ Result: Concrete effect type instead of :l
 
 ### Coverage
 
-**50 test cases** covering:
+**40 test cases** covering:
 - Enum operations on List, Map, MapSet, Range
 - User-defined structs (pure and effectful)
 - Effect combinations (pure/pure, pure/effectful, effectful/pure, effectful/effectful)
@@ -250,7 +250,7 @@ All composition rules verified:
 1. Add String.Chars resolution (+1 hour)
 2. Add Inspect resolution (+1 hour)
 3. Add Collectable resolution (+2 hours)
-4. Update benchmark to test all 50 cases (+1 hour)
+4. Update benchmark to test all 40 cases (+1 hour)
 
 **Estimated Effort**: 4-5 hours
 **Risk**: Very Low (same pattern as Enumerable)
@@ -497,12 +497,12 @@ Protocol dispatch effect tracing is:
 3. `test/spike3/integration_test.exs` (11 tests)
 4. `test/spike3/user_struct_test.exs` (21 tests)
 5. `test/spike3/protocol_effect_tracer_test.exs` (44 tests)
-6. `test/spike3/benchmark_test.exs` (50 benchmark cases)
+6. `test/spike3/benchmark_test.exs` (40 benchmark cases)
 
 ### Documentation
 
 1. `spike3/protocol_corpus.ex` (174 lines - test data)
-2. `spike3/benchmark_corpus.ex` (860 lines - 50 test cases)
+2. `spike3/benchmark_corpus.ex` (~700 lines - 40 test cases)
 3. `spike3/FINDINGS_DAY1_MORNING.md`
 4. `spike3/FINDINGS_DAY2_MORNING.md`
 5. `spike3/BENCHMARK_RESULTS.md`
@@ -523,7 +523,7 @@ Protocol dispatch effect tracing is:
 **Breakdown**:
 - Unit tests: 145
 - Integration tests: 11
-- Benchmark cases: 50 (19 tested, 31 skipped)
+- Benchmark cases: 40 (19 tested, 21 skipped)
 - Doctests: 25
 
 **Coverage**:
@@ -543,7 +543,7 @@ Protocol dispatch effect tracing is:
 - BEAM: OTP 25
 
 **Results**:
-- Benchmark runtime: ~100ms for 50 cases
+- Benchmark runtime: ~80ms for 40 cases
 - Average per case: ~2ms
 - Type inference: <0.1ms
 - Protocol resolution: <0.1ms

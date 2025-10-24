@@ -1,7 +1,7 @@
 #!/usr/bin/env elixir
 
 # Spike 3 Protocol Effect Tracing Benchmark
-# Runs all 50 test cases and measures accuracy
+# Runs all 40 test cases and measures accuracy
 
 Code.require_file("spike3/benchmark_corpus.ex", File.cwd!())
 Code.require_file("lib/litmus/spike3/protocol_effect_tracer.ex", File.cwd!())
@@ -20,7 +20,7 @@ defmodule Spike3.BenchmarkRunner do
     IO.puts("\n" <> String.duplicate("=", 80))
     IO.puts("SPIKE 3: PROTOCOL EFFECT TRACING BENCHMARK")
     IO.puts(String.duplicate("=", 80))
-    IO.puts("\nRunning 50 test cases...")
+    IO.puts("\nRunning 40 test cases...")
     IO.puts("")
 
     cases = BenchmarkCorpus.all_cases()
@@ -206,7 +206,7 @@ defmodule Spike3.BenchmarkRunner do
           "⚠️  MEDIUM GO - Feasible with known limitations (#{Float.round(accuracy, 2)}% accuracy)"
         )
 
-      accuracy >= 50.0 ->
+      accuracy >= 70.0 ->
         IO.puts(
           "⚠️  LOW GO - Needs more investigation (#{Float.round(accuracy, 2)}% accuracy)"
         )

@@ -1005,9 +1005,11 @@ These attribution lines should be omitted from all commits in this project.
 ### 1. PURITY Version Compatibility
 
 PURITY was developed in 2011 for Erlang R14:
-- **Map literals** (added R17/2014) not supported
-- **Modern Elixir code** with maps fails to analyze
-- **Erlang stdlib modules** work perfectly
+- **Map literals** (added R17/2014) not supported by PURITY bytecode analyzer
+- **`:maps` module functions** - Whitelisted in `.effects.explicit.json` (manually classified as pure)
+- **NIF stubs** - Functions using `erlang:nif_error/1` require explicit whitelist entries
+- **Modern Elixir code** with maps can be analyzed via bidirectional inference (AST-based)
+- **Pre-R17 Erlang stdlib modules** work perfectly with PURITY
 
 ### 2. Dynamic Language Features
 

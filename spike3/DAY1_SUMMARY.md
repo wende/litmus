@@ -293,7 +293,7 @@ spike3/
 - Combine implementation + lambda effects
 
 ### Evening: Benchmarking & Report (2 hours)
-- 50 test cases (20 built-in, 20 user, 10 complex)
+- 40 test cases (20 built-in, 15 user, 5 complex)
 - Measure accuracy, false positives, false negatives
 - Document limitations and edge cases
 - Final GO/NO-GO recommendation
